@@ -2,6 +2,11 @@
   "capturedAt": "2026-10-22",
   "environmentId": "75de8a22-a0d1-4ad1-81b8-5da350bd9951",
   "dshVersion": "0.2.1-rc.2",
+  "categories": ["主题", "辅助", "布局", "功能"],
+  "mirrors": {
+    "npm": "https://registry.npmmirror.com/",
+    "github": "https://gh-proxy.com/"
+  },
   "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app",
@@ -24,94 +29,169 @@
   ],
   "plugins": [
     {
-      "name": "@dsh-external/dsh-memory",
-      "version": "0.5.0",
-      "spec": "github:haitang1/dsh-memory",
-      "source": "git"
-    },
-    {
-      "name": "@michengai/dsh-agency-agents",
-      "version": "1.2.10",
-      "spec": "1.2.10",
-      "source": "npm"
-    },
-    {
-      "name": "@nanmicoder/dsh-agent-teams",
-      "version": "0.1.26",
-      "spec": "0.1.26",
-      "source": "npm"
-    },
-    {
-      "name": "@xbzbing/dsh-git-panel",
-      "version": "1.8.2",
-      "spec": "1.8.2",
-      "source": "npm"
-    },
-    {
-      "name": "dsh-at-file",
-      "version": "0.6.3",
-      "spec": "^0.6.3",
-      "source": "npm"
-    },
-    {
-      "name": "dsh-better-sidebar",
-      "version": "0.28.0",
-      "spec": "^0.28.0",
-      "source": "npm"
-    },
-    {
-      "name": "dsh-config-manager",
-      "version": "0.1.79",
-      "spec": "^0.1.79",
-      "source": "npm"
-    },
-    {
-      "name": "dsh-dream-skin",
-      "version": "10.21.2",
-      "spec": "^10.21.2",
-      "source": "npm"
-    },
-    {
-      "name": "dsh-http-proxy",
-      "version": "0.1.3",
-      "spec": "0.1.3",
-      "source": "npm"
+      "name": "dshmarket",
+      "version": "1.66.47",
+      "spec": "^1.66.47",
+      "source": "npm",
+      "required": true,
+      "category": "必需",
+      "title": "插件市场",
+      "description": "可视化浏览、搜索和一键安装社区插件，是后续管理插件的入口。",
+      "url": "https://dshmarket.com"
     },
     {
       "name": "dsh-network-config",
       "version": "1.0.0",
       "spec": "file:./local-packages/dsh-network-config-1.0.0.tgz",
-      "source": "local"
+      "source": "local",
+      "required": true,
+      "category": "必需",
+      "title": "网络配置",
+      "description": "在设置中选择跟随系统代理、直连或自定义代理，修改后实时生效。",
+      "url": "https://github.com/johnsonpanq-ctrl/dsh-network-config"
+    },
+    {
+      "name": "dsh-http-proxy",
+      "version": "0.1.3",
+      "spec": "0.1.3",
+      "source": "npm",
+      "required": true,
+      "category": "必需",
+      "title": "HTTP 代理",
+      "description": "让模型 API 请求走 HTTP/SOCKS 代理，避免网络受限时无法连接。",
+      "url": "https://github.com/elizax/dsh-http-proxy"
+    },
+    {
+      "name": "dsh-dream-skin",
+      "version": "10.21.2",
+      "spec": "^10.21.2",
+      "source": "npm",
+      "required": false,
+      "category": "主题",
+      "title": "Dream Skin 主题",
+      "description": "8 套 iOS/Linear 风格主题、弥散光壁纸、强调色与主题包分享。",
+      "url": "https://github.com/RevolutionLA/dsh-dream-skin"
+    },
+    {
+      "name": "@dsh-external/dsh-memory",
+      "version": "0.5.0",
+      "spec": "github:haitang1/dsh-memory",
+      "source": "git",
+      "required": false,
+      "category": "辅助",
+      "title": "持久记忆",
+      "description": "自动注入记忆摘要，按会话沉淀长期记忆，类似 Codex 的持久记忆。",
+      "url": "https://github.com/haitang1/dsh-memory"
+    },
+    {
+      "name": "@nanmicoder/dsh-agent-teams",
+      "version": "0.1.26",
+      "spec": "0.1.26",
+      "source": "npm",
+      "required": false,
+      "category": "辅助",
+      "title": "Agent Teams",
+      "description": "多智能体团队协作：队长、成员、任务依赖和消息，用自然语言驱动。",
+      "url": "https://github.com/NanmiCoder/dsh-agent-teams"
+    },
+    {
+      "name": "@michengai/dsh-agency-agents",
+      "version": "1.2.10",
+      "spec": "1.2.10",
+      "source": "npm",
+      "required": false,
+      "category": "辅助",
+      "title": "Agency Agents",
+      "description": "331 名可召唤的专业领域智能体，覆盖产品、设计、工程、数据等角色。",
+      "url": "https://github.com/MichengAI/dsh-agency-agents"
     },
     {
       "name": "dsh-notification",
       "version": "0.1.2",
       "spec": "^0.1.2",
-      "source": "npm"
+      "source": "npm",
+      "required": false,
+      "category": "辅助",
+      "title": "通知提醒",
+      "description": "任务完成、出错或需要审批时发送桌面或 Webhook 通知。",
+      "url": "https://github.com/nishit130/dsh-notification"
     },
     {
-      "name": "dsh-openspec",
-      "version": "0.1.0",
-      "spec": "github:tamashi486/dsh-openspec",
-      "source": "git"
+      "name": "dsh-better-sidebar",
+      "version": "0.28.0",
+      "spec": "^0.28.0",
+      "source": "npm",
+      "required": false,
+      "category": "布局",
+      "title": "增强侧边栏",
+      "description": "文件树、编辑器、变更、任务和侧聊集中在一列，并按会话隔离。",
+      "url": "https://github.com/omdsh-dev/DSH-better-sidebar"
     },
     {
       "name": "dsh-whale-widget",
       "version": "0.4.2",
       "spec": "^0.4.2",
-      "source": "npm"
+      "source": "npm",
+      "required": false,
+      "category": "布局",
+      "title": "余额小鲸鱼",
+      "description": "右下角显示余额、今日用量和峰谷价格，支持气泡、音效和自定义角色。",
+      "url": "https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget"
+    },
+    {
+      "name": "dsh-at-file",
+      "version": "0.6.3",
+      "spec": "^0.6.3",
+      "source": "npm",
+      "required": false,
+      "category": "功能",
+      "title": "@ 文件引用",
+      "description": "在输入框用 @ 搜索工作区路径，不把文件内容直接注入对话。",
+      "url": "https://www.npmjs.com/package/dsh-at-file"
+    },
+    {
+      "name": "dsh-config-manager",
+      "version": "0.1.79",
+      "spec": "^0.1.79",
+      "source": "npm",
+      "required": false,
+      "category": "功能",
+      "title": "配置管理",
+      "description": "备份、恢复、导入导出、迁移和同步 DSH 设置、插件、技能与工作区。",
+      "url": "https://github.com/xiajiajun516/dsh-config-manager"
+    },
+    {
+      "name": "dsh-openspec",
+      "version": "0.1.0",
+      "spec": "github:tamashi486/dsh-openspec",
+      "source": "git",
+      "required": false,
+      "category": "功能",
+      "title": "OpenSpec",
+      "description": "将 OpenSpec 规范驱动开发作为内置技能提供，无需全局安装。",
+      "url": "https://github.com/tamashi486/dsh-openspec"
     },
     {
       "name": "dsh-workspace-acl-allow",
       "version": "0.1.1",
       "spec": "github:lovezi0/dsh-workspace-acl-allow",
-      "source": "git"
+      "source": "git",
+      "required": false,
+      "category": "功能",
+      "title": "工作区 ACL",
+      "description": "为工作区预置 Windows ACL 完全控制权限，减少沙箱授权弹框。",
+      "url": "https://github.com/lovezi0/dsh-workspace-acl-allow"
     },
     {
-      "name": "dshmarket",
-      "version": "1.66.47",
-      "spec": "^1.66.47",
-      "source": "npm"
+      "name": "@xbzbing/dsh-git-panel",
+      "version": "1.8.2",
+      "spec": "1.8.2",
+      "source": "npm",
+      "required": false,
+      "category": "功能",
+      "title": "Git 面板",
+      "description": "IDE 风格 Git 面板：分支、历史、未提交更改、提交/修补和差异统计。",
+      "url": "https://github.com/xbzbing/dsh-git-panel"
     }
   ]
 }

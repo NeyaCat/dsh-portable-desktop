@@ -27,7 +27,7 @@ if (-not (Test-Path -LiteralPath $ico)) {
     throw "Icon not found: $ico. Copy 'DeepSeek Harness.ico' next to the built executables."
 }
 
-$generated = Join-Path ([System.IO.Path]::GetTempPath()) ('dsh-shell-info-' + [Guid]::NewGuid().ToString('N'))
+$generated = Join-Path $appRoot ('.build-info-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $generated | Out-Null
 
 function New-AssemblyInfo([string]$Path, [string]$Title, [string]$Description) {
@@ -56,10 +56,10 @@ Copy-Item -LiteralPath "$sdk\lib\net462\Microsoft.Web.WebView2.WinForms.dll" -De
 Copy-Item -LiteralPath "$sdk\runtimes\win-x64\native\WebView2Loader.dll" -Destination $appRoot -Force
 
 try {
-    & $compiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$ico" "/resource:$PSScriptRoot\DesktopChrome.js,DesktopChrome.js" "/out:$appRoot\DeepSeek Harness.exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll "/reference:$appRoot\Microsoft.Web.WebView2.Core.dll" "/reference:$appRoot\Microsoft.Web.WebView2.WinForms.dll" "$PSScriptRoot\Desktop.cs" "$PSScriptRoot\LoadingSurface.cs" "$PSScriptRoot\DesktopPreferences.cs" "$PSScriptRoot\Updates.cs" "$PSScriptRoot\SkinTheme.cs" "$PSScriptRoot\ProxyBridge.cs" "$shellInfo"
+    & $compiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$ico" "/resource:$PSScriptRoot\DesktopChrome.js,DesktopChrome.js" "/out:$appRoot\DeepSeek Harness.exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "/reference:$appRoot\Microsoft.Web.WebView2.Core.dll" "/reference:$appRoot\Microsoft.Web.WebView2.WinForms.dll" "$PSScriptRoot\Desktop.cs" "$PSScriptRoot\LoadingSurface.cs" "$PSScriptRoot\DesktopPreferences.cs" "$PSScriptRoot\Updates.cs" "$PSScriptRoot\SkinTheme.cs" "$PSScriptRoot\ProxyBridge.cs" "$PSScriptRoot\RuntimeEnvironment.cs" "$PSScriptRoot\EnvironmentCheck.cs" "$PSScriptRoot\DefaultPlugins.cs" "$PSScriptRoot\PluginPicker.cs" "$shellInfo"
     if ($LASTEXITCODE -ne 0) { throw 'DeepSeek Harness.exe compilation failed' }
 
-    & $compiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$ico" "/resource:$PSScriptRoot\VersionSwitch.html,VersionSwitch.html" "/out:$appRoot\Version Switch.exe" "/reference:$appRoot\Microsoft.Web.WebView2.Core.dll" "/reference:$appRoot\Microsoft.Web.WebView2.WinForms.dll" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll "$PSScriptRoot\VersionSwitch.cs" "$PSScriptRoot\Updates.cs" "$PSScriptRoot\SkinTheme.cs" "$switchInfo"
+    & $compiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$ico" "/resource:$PSScriptRoot\VersionSwitch.html,VersionSwitch.html" "/out:$appRoot\Version Switch.exe" "/reference:$appRoot\Microsoft.Web.WebView2.Core.dll" "/reference:$appRoot\Microsoft.Web.WebView2.WinForms.dll" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "$PSScriptRoot\VersionSwitch.cs" "$PSScriptRoot\Updates.cs" "$PSScriptRoot\SkinTheme.cs" "$PSScriptRoot\RuntimeEnvironment.cs" "$PSScriptRoot\EnvironmentCheck.cs" "$switchInfo"
     if ($LASTEXITCODE -ne 0) { throw 'Version Switch.exe compilation failed' }
 }
 finally {

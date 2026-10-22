@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Builds the portable DSH package (runtime + desktop shell) and a ZIP from source.
@@ -6,8 +6,10 @@
     Run from a checkout of this repository on 64-bit Windows. The script downloads
     Node.js (SHA-256 verified against the official manifest), installs
     @deepseek-ai/dsh with the bundled npm, compiles the desktop shell with
-    desktop\Build.ps1, installs the vendored pnpm toolchain, and writes the ZIP
-    next to the output folder. No Node.js, npm, Visual Studio or SDK is required.
+    desktop\Build.ps1, installs the vendored pnpm toolchain, bundles MinGit, and
+    with -BundleWebView2 also adds the Microsoft-signed WebView2 fixed-version
+    runtime. Writes the ZIP next to the output folder. No Node.js, npm, Visual
+    Studio or SDK is required.
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\packaging\build-portable.ps1
 .EXAMPLE
@@ -21,6 +23,8 @@ param(
     [string]$Registry = 'https://registry.npmjs.org/',
     [string]$NodeMirror = 'https://nodejs.org/dist/',
     [string]$OutDir = '',
+    [string]$WebView2Version = 'latest',
+    [switch]$BundleWebView2,
     [switch]$SkipZip
 )
 
@@ -35,6 +39,27 @@ function Write-Ok([string]$Message) {
 }
 function Fail([string]$Message) {
     throw $Message
+}
+function Get-WebView2FixedRuntime([string]$Version) {
+    $page = Invoke-WebRequest -UseBasicParsing -Uri 'https://developer.microsoft.com/en-us/microsoft-edge/webview2/'
+    $html = ([string]$page.Content) -replace '\\u002F', '/'
+    $pattern = 'https://msedge[^"''\s<>\\]+/Microsoft\.WebView2\.FixedVersionRuntime\.(\d+\.\d+\.\d+\.\d+)\.x64\.cab'
+    $found = @()
+    foreach ($match in [regex]::Matches($html, $pattern)) {
+        $found += [pscustomobject]@{ Version = $match.Groups[1].Value; Url = $match.Value }
+    }
+    if ($found.Count -eq 0) {
+        Fail 'Could not find a WebView2 fixed-version x64 download on the Microsoft page.'
+    }
+    if ([string]::IsNullOrWhiteSpace($Version) -or $Version -eq 'latest') {
+        $pick = $found | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1
+    } else {
+        $pick = $found | Where-Object { $_.Version -eq $Version } | Select-Object -First 1
+    }
+    if ($null -eq $pick) {
+        Fail "WebView2 fixed version $Version is not offered anymore. Use -WebView2Version latest."
+    }
+    return $pick
 }
 function Invoke-Npm([string]$NpmCmd, [string]$WorkingDirectory, [string[]]$NpmArguments) {
     Push-Location -LiteralPath $WorkingDirectory
@@ -181,28 +206,88 @@ try {
     }
     Write-Ok 'pnpm toolchain installed'
 
+    Write-Step 'Bundling Git for plugin installs'
+    $gitVersion = '2.56.0.2'
+    $gitSha = 'DA35E72AA21C005A5A0D298CFBAE110BC1609A815730EA0DDE84B01A1B3CD3BE'
+    $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-$gitVersion-64-bit.zip"
+    $gitZip = Join-Path $downloads 'mingit.zip'
+    Invoke-WebRequest -UseBasicParsing -Uri $gitUrl -OutFile $gitZip
+    $gitActual = (Get-FileHash -LiteralPath $gitZip -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($gitActual -ne $gitSha) {
+        Fail "MinGit SHA-256 mismatch! Expected $gitSha, got $gitActual"
+    }
+    Expand-Archive -LiteralPath $gitZip -DestinationPath (Join-Path $payload 'git')
+    if (-not (Test-Path -LiteralPath (Join-Path $payload 'git\cmd\git.exe'))) {
+        Fail 'MinGit archive is unexpected (git.exe missing).'
+    }
+    Write-Ok "Bundled Git $gitVersion for GitHub plugin installs"
+
+    $webviewVersion = ''
+    if ($BundleWebView2) {
+        Write-Step 'Bundling the WebView2 fixed-version runtime'
+        $pick = Get-WebView2FixedRuntime $WebView2Version
+        $webviewVersion = $pick.Version
+        $cab = Join-Path $downloads 'webview2.cab'
+        Invoke-WebRequest -UseBasicParsing -Uri $pick.Url -OutFile $cab
+        $webviewDir = Join-Path $payload 'webview2'
+        [System.IO.Directory]::CreateDirectory($webviewDir) | Out-Null
+        & "$env:WINDIR\System32\expand.exe" $cab -F:* $webviewDir | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Fail "expand.exe failed while unpacking the WebView2 runtime (exit code $LASTEXITCODE)."
+        }
+        $runtimeExe = Get-ChildItem -LiteralPath $webviewDir -Recurse -Filter 'msedgewebview2.exe' |
+            Select-Object -First 1
+        if ($null -eq $runtimeExe) {
+            Fail 'The WebView2 fixed-version package did not contain msedgewebview2.exe.'
+        }
+        if ($runtimeExe.DirectoryName -ne [System.IO.Path]::GetFullPath($webviewDir).TrimEnd('\')) {
+            $nested = $runtimeExe.DirectoryName
+            Get-ChildItem -LiteralPath $nested -Force |
+                Move-Item -Destination $webviewDir -Force
+            Remove-Item -LiteralPath $nested -Recurse -Force
+        }
+        $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $webviewDir 'msedgewebview2.exe')
+        if ($signature.Status -ne 'Valid' -or
+            $signature.SignerCertificate.Subject -notmatch 'Microsoft') {
+            Fail 'The downloaded WebView2 runtime is not validly signed by Microsoft.'
+        }
+        Write-Ok "Bundled WebView2 fixed version $webviewVersion (no system runtime required)"
+    }
+
     Write-Step 'Writing launcher and documentation'
     Copy-Item -LiteralPath (Join-Path $repo 'desktop\update-worker.cjs') -Destination (Join-Path $payload 'desktop') -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'desktop\install-plugins.cjs') -Destination (Join-Path $payload 'desktop') -Force
     $launcher = "@echo off`r`nstart `"`" `"%~dp0DeepSeek Harness.exe`"`r`n"
     [System.IO.File]::WriteAllText(
         (Join-Path $payload 'Run-DSH.cmd'),
         $launcher,
         [System.Text.Encoding]::ASCII
     )
+    $bundled = "DSH $DshVersion / Node.js $NodeVersion / Git $gitVersion"
+    if ($BundleWebView2) {
+        $bundled += " / WebView2 $webviewVersion (fixed)"
+        $webviewNote = '3. 需要 Windows x64 和 .NET Framework 4.6.2+；WebView2 固定版本已内置，无需系统安装。'
+    } else {
+        $webviewNote = '3. 需要 Windows x64、.NET Framework 4.6.2+ 和 Microsoft Edge WebView2 Runtime（首次启动可自动安装）。'
+    }
     $guide = @"
 DSH Portable Desktop (unofficial) - Windows x64
 ================================================
 
 Shell: DSH Portable Desktop $Version
-Bundled: DSH $DshVersion / Node.js $NodeVersion
+Bundled: $bundled
 
 【运行】
 1. 把整个文件夹解压到可写目录（不要放 Program Files）。
 2. 双击 DeepSeek Harness.exe；重复双击会唤起已运行的窗口。
-3. 需要 Windows x64、.NET Framework 4.6.2+ 和 Microsoft Edge WebView2 Runtime。
+$webviewNote
+4. 首次启动会检查环境；Git/pnpm 缺失时可自动补全。也可手动运行：
+   DeepSeek Harness.exe --verify-environment
+   DeepSeek Harness.exe --repair-environment
+5. 环境检查通过后会选择推荐插件：选择安装时插件市场/HTTP 代理/网络配置为必需，其余按主题、辅助、布局、功能分组勾选；选择“暂不安装”则跳过全部插件。直连不可用时自动使用镜像。
 
 【数据】
-配置、会话、日志和 WebView2 数据都在本目录 data 下；删除整个文件夹即完成卸载。
+配置、会话、日志、环境体检结果和 WebView2 数据都在本目录 data 下；删除整个文件夹即完成卸载。
 
 【说明】
 - 非官方项目，与 DeepSeek 无隶属关系。

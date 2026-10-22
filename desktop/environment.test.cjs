@@ -3,12 +3,16 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const path=require('node:path');
-const os=require('node:os');
 const S=require('./environment-store.cjs');
 const P=require('./plugin-resolver.cjs');
 const T=require('./switch-transaction.cjs');
+async function testTemp(prefix) {
+  const base=path.join(process.cwd(),'.test-tmp');
+  await fs.mkdir(base,{recursive:true});
+  return fs.mkdtemp(path.join(base,prefix));
+}
 async function fixture() {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'dsh-environment-test-'));
+  const root=await testTemp('dsh-environment-test-');
   for(const [directory,version] of [['bundled','1.0.0'],['v2','2.0.0']]) {
     const folder=directory==='bundled'?root:path.join(root,'versions',directory);
     await S.write(path.join(folder,'node_modules/@deepseek-ai/dsh/package.json'),{version});
@@ -75,7 +79,7 @@ test('fixed version policy drift requires new confirmation',async()=>{
 });
 test('external links and path traversal cannot be copied into snapshots',async()=>{
  assert.throws(()=>S.inside('C:/managed','../outside'));assert.throws(()=>S.safeId('../outside'));
- const root=await fixture();const outside=await fs.mkdtemp(path.join(os.tmpdir(),'dsh-outside-test-'));
+  const root=await fixture();const outside=await testTemp('dsh-outside-test-');
  await fs.symlink(outside,path.join(root,'data/external'),process.platform==='win32'?'junction':'dir');
  await assert.rejects(S.treeHash(path.join(root,'data')),/超出/);
 });

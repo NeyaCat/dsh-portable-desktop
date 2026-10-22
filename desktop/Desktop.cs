@@ -30,12 +30,37 @@ internal static class Program
             catch (ArgumentException) {}
         }
         if (Array.IndexOf(args,"--verify-exit-settings") >= 0)
-            DesktopPreferences.FilePath = Path.Combine(Path.GetTempPath(),"dsh-preferences-test-"+Guid.NewGuid()+".json");
+        {
+            string verify = Path.Combine(Root, "data", ".verify");
+            Directory.CreateDirectory(verify);
+            DesktopPreferences.FilePath = Path.Combine(verify, "dsh-preferences-test-" + Guid.NewGuid().ToString("N") + ".json");
+        }
         // Headless self-test of the proxy bridge: no window and no single-instance
         // mutex, an exit code of 0/1, and PASS/FAIL lines in data/desktop.log.
         if (Array.IndexOf(args, "--verify-proxy-bridge") >= 0)
         {
             Environment.ExitCode = ProxyBridgeSelfTest.Run();
+            return;
+        }
+        if (Array.IndexOf(args, "--verify-environment") >= 0)
+        {
+            Environment.ExitCode = EnvironmentCheck.Verify();
+            return;
+        }
+        if (Array.IndexOf(args, "--repair-environment") >= 0)
+        {
+            Environment.ExitCode = EnvironmentCheck.RepairBundled();
+            return;
+        }
+        if (Array.IndexOf(args, "--preview-plugin-picker") >= 0)
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            var catalog = DefaultPlugins.Catalog(Root);
+            foreach (var plugin in catalog)
+                RuntimeEnvironment.Log("Picker preview: " + plugin.Name + " url=" + plugin.Url + " title=" + plugin.Title);
+            using (var picker = new PluginPicker(catalog))
+                picker.ShowDialog();
             return;
         }
         Run();
@@ -62,6 +87,7 @@ internal static class Program
             {
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (!EnvironmentCheck.EnsureReady()) return;
                 using (var window = new DesktopWindow())
                 {
                     // Auto-reset event retains activation requests received during startup.
@@ -948,6 +974,64 @@ internal sealed class DesktopWindow : Form
         catch (Exception error) { UpdateToast("error", "无法打开版本管理：" + error.Message); }
     }
 
+    // First run: show the recommended-plugin picker. Required plugins are
+    // locked; optional plugins start checked and can be deselected. A failed
+    // attempt is retried on the next launch.
+    private async Task EnsureRecommendedPluginsAsync(string home)
+    {
+        try
+        {
+            if (!DefaultPlugins.Available(Program.Root)) return;
+            string profile = Path.Combine(home, "profiles", "web");
+            string decision = DesktopPreferences.RecommendedPlugins;
+            if (decision == "installed" || decision == "declined") return;
+            // An existing profile belongs to the user; never replace it.
+            if (decision == "" && File.Exists(Path.Combine(profile, "package.json"))) return;
+            List<RecommendedPlugin> catalog = DefaultPlugins.Catalog(Program.Root);
+            if (catalog.Count == 0)
+            {
+                Log("Recommended plugins: catalog is empty or unreadable");
+                return;
+            }
+            List<string> selected;
+            using (var picker = new PluginPicker(catalog))
+            {
+                if (picker.ShowDialog(this) != DialogResult.OK)
+                {
+                    DesktopPreferences.SaveRecommendedPlugins("declined");
+                    Log("Recommended plugins: declined");
+                    return;
+                }
+                selected = picker.SelectedNames;
+            }
+            long free = RuntimeEnvironment.FreeDiskBytes();
+            if (free > 0 && free < 3L * 1024 * 1024 * 1024)
+                MessageBox.Show(this, "当前磁盘剩余空间不足 3 GB。\r\n首次安装插件可能失败，建议先清理磁盘或只保留必需组件。",
+                    "DSH 首次启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            DesktopPreferences.SaveRecommendedPlugins("failed");
+            Log("Recommended plugins: selected " + selected.Count + " plugin(s)");
+            ShowLoading("正在安装所选插件（必需组件优先，首次约下载 200 MB）…");
+            bool ok = await Task.Run(delegate { return DefaultPlugins.Install(Program.Root, home, proxyBridge, Log, selected); });
+            if (proxyBridge != null) Log("ProxyBridge: npmrc " + proxyBridge.SyncNow());
+            if (ok)
+            {
+                DesktopPreferences.SaveRecommendedPlugins("installed");
+                Log("Recommended plugins: installed");
+            }
+            else
+            {
+                Log("Recommended plugins: failed");
+                MessageBox.Show(this, "插件安装未完成。必需组件会优先重试；请检查网络后重启，或稍后在插件市场中安装其余插件。",
+                    "DSH 首次启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            ShowLoading("正在初始化窗口组件…");
+        }
+        catch (Exception error)
+        {
+            Log("Recommended plugins failed: " + error.Message);
+        }
+    }
+
     private async Task StartAsync()
     {
         try
@@ -975,6 +1059,7 @@ internal sealed class DesktopWindow : Form
             // the bridge reads exactly the file the plugin writes, then follows it.
             proxyBridge = new ProxyBridge(environmentHome, Log);
             proxyBridge.Initialize();
+            await EnsureRecommendedPluginsAsync(environmentHome);
             environmentTrial=runtime.ContainsKey("trial") && (bool)runtime["trial"];
             if(runtime.ContainsKey("expectedPlugins")) expectedPlugins=runtime["expectedPlugins"];
             if(runtime.ContainsKey("plugins")) environmentPlugins=runtime["plugins"];
@@ -985,7 +1070,8 @@ internal sealed class DesktopWindow : Form
             if (runtime.ContainsKey("warning")) Log(Updates.Value(runtime, "warning"));
             // Browser storage travels with the portable folder.
             status.Text = "正在初始化窗口组件…";
-            var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(data, "desktop-webview", environmentId==""?"legacy":environmentId));
+            var environment = await RuntimeEnvironment.CreateWebView2EnvironmentAsync(
+                Path.Combine(data, "desktop-webview", environmentId==""?"legacy":environmentId));
             if (closing) return;
             await web.EnsureCoreWebView2Async(environment);
             if (closing) return;
@@ -1245,7 +1331,7 @@ internal sealed class DesktopWindow : Form
         info.StandardOutputEncoding = Encoding.UTF8;
         info.StandardErrorEncoding = Encoding.UTF8;
         info.EnvironmentVariables["DSH_HOME"] = data;
-        info.EnvironmentVariables["PATH"] = Path.Combine(Program.Root, "node") + ";" + Path.Combine(Program.Root,"desktop","plugin-tools","node_modules",".bin") + ";" + Environment.GetEnvironmentVariable("PATH");
+        info.EnvironmentVariables["PATH"] = Path.Combine(Program.Root, "node") + ";" + Path.Combine(Program.Root,"desktop","plugin-tools","node_modules",".bin") + ";" + Path.Combine(Program.Root,"git","cmd") + ";" + Environment.GetEnvironmentVariable("PATH");
         info.EnvironmentVariables["npm_config_cache"] = Path.Combine(data, "npm-cache");
         info.EnvironmentVariables["NO_COLOR"] = "1";
         // pnpm ignores HTTP_PROXY and the Windows system proxy, and the settings

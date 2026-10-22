@@ -32,7 +32,9 @@ DSH Portable Desktop 是一个自带运行环境的 Windows x64 桌面外壳：�
 | 🔀 | **版本管理** | `Version Switch.exe` 列出并安装官方 DSH 发行版，运行中的版本永不被覆盖；更新在应用内提示，下次启动生效 |
 | 🌐 | **安装代理桥** | 读取 `dsh-network-config` 的网络模式，把代理同时交给后端进程与每个 profile 的 `.npmrc`，并让 git 的 GitHub SSH 地址改写为 HTTPS；`direct` 模式会清除这些设置 |
 | 🧹 | **残留锁自愈** | 启动时清理被中断的安装留下的 `.plugin-manager/run.json` 与 `package.json.lock`（PID 已退出且记录超过 2 分钟才动） |
-| 📦 | **便携** | 配置、会话、日志与 WebView2 数据都在 EXE 旁的 `data/`；整个文件夹搬走就是搬家 |
+| 🩺 | **首次启动体检** | 检查系统版本、数据目录、Node.js、DSH、Git、pnpm 与 WebView2；可自动下载便携 Git/pnpm，WebView2 缺失时可自动安装或引导安装 |
+| 🧩 | **推荐插件选择** | 首次启动按「主题 / 辅助 / 布局 / 功能」分组展示 15 个插件，可勾选安装并打开介绍页；选择安装时插件市场、HTTP 代理、网络配置固定包含 |
+| 📦 | **便携** | 配置、会话、日志、WebView2 数据、Node.js、DSH、Git、pnpm 都在 EXE 旁；发布包可选内置 WebView2 固定版本，去掉对系统运行时的依赖 |
 | 🔒 | **仅本机** | 界面只监听 `127.0.0.1` 的随机空闲端口；外部链接交给默认浏览器 |
 
 ## 🚀 快速开始
@@ -41,7 +43,11 @@ DSH Portable Desktop 是一个自带运行环境的 Windows x64 桌面外壳：�
 2. 解压到**可写**目录（不要放 `Program Files`）；
 3. 双击 `DeepSeek Harness.exe`，运行数据会生成在 `./data`。
 
-**运行要求**：Windows 10/11 x64、.NET Framework 4.6.2 或更高、Microsoft Edge WebView2 Runtime（Windows 11 和较新的 Windows 10 已内置）。
+**运行要求**：Windows 10/11 x64、.NET Framework 4.6.2 或更高。Node.js、DSH、Git、pnpm 随包提供；WebView2 优先使用包内 `webview2/` 固定版本，未内置时使用系统 Evergreen Runtime，缺失会询问是否自动安装。
+
+首次启动会执行一次环境体检，并把结果写入 `data/environment-check.json`。Git/pnpm 缺失时会询问是否自动补全；选择“否”后不再自动询问，可随时运行 `DeepSeek Harness.exe --repair-environment` 修复，或用 `--verify-environment` 生成 `data/environment-check.txt` 检查报告。
+
+体检通过后会打开推荐插件选择窗口：选择安装时，插件市场、HTTP 代理、网络配置三项固定包含；其余插件默认勾选、可逐项取消，点击「查看功能」打开对应说明页；选择「暂不安装」则不安装任何插件。安装时先装三个必需插件，再装其他插件；直连 npm/GitHub 不可用时自动切换 npmmirror 与 gh-proxy 镜像。
 
 **卸载**：退出程序后直接删除整个文件夹即可 —— 不写注册表，不在系统目录留东西。
 
@@ -55,7 +61,12 @@ powershell -ExecutionPolicy Bypass -File .\desktop\Build.ps1
 
 `desktop\Build.ps1` 会把 `desktop\*.cs` 编译成根目录的 `DeepSeek Harness.exe` 与 `Version Switch.exe`，把 WebView2 SDK 的 DLL 和 loader 复制到旁边，并把 `DesktopChrome.js`、`VersionSwitch.html` 作为程序集资源嵌入。
 
-便携运行时（Node.js + `@deepseek-ai/dsh`）不随仓库提供。完整包（运行时 + 已编译外壳 + ZIP）由 `packaging/build-portable.ps1` 产出，发布流水线在 GitHub 托管的 Windows runner 上执行；Node.js 与 DSH 均从官方来源获取，并在上游提供校验和时进行校验。
+便携运行时（Node.js + `@deepseek-ai/dsh`）不随仓库提供。完整包（运行时 + Git + pnpm + 已编译外壳 + ZIP）由 `packaging/build-portable.ps1` 产出，发布流水线在 GitHub 托管的 Windows runner 上执行；Node.js、DSH 与 MinGit 均从官方来源获取，并在上游提供校验和时进行校验。
+
+```powershell
+# 官方发布包：额外内置 WebView2 固定版本，完全不依赖系统 WebView2（约增加 670 MB）
+powershell -ExecutionPolicy Bypass -File .\packaging\build-portable.ps1 -BundleWebView2
+```
 
 ```text
 desktop/                 外壳与版本管理的 C# 源码
@@ -71,6 +82,9 @@ DeepSeek Harness.ico     传给编译器的程序图标
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\desktop\Test-ProxyBridge.ps1   # 代理桥，无需关闭程序
+.\DeepSeek Harness.exe --verify-environment                                # 环境体检，结果写入 data\environment-check.txt
+.\DeepSeek Harness.exe --repair-environment                                # 补全便携 Git/pnpm
+.\DeepSeek Harness.exe --preview-plugin-picker                             # 预览首次启动插件选择窗口
 powershell -ExecutionPolicy Bypass -File .\desktop\Test-Desktop.ps1       # 窗口与进程生命周期，需先关闭程序
 ```
 

@@ -66,6 +66,27 @@ internal static class DesktopPreferences
         Write(data);
     }
 
+    // First-run recommended plugin choice: "" (not asked), "installed",
+    // "declined", or "failed" (attempted but not completed; ask again next launch).
+    internal static string RecommendedPlugins
+    {
+        get
+        {
+            object value;
+            if(!Read().TryGetValue("recommendedPlugins",out value)) return "";
+            string text=value as string;
+            return text=="installed" || text=="declined" || text=="failed" ? text : "";
+        }
+    }
+
+    internal static void SaveRecommendedPlugins(string state)
+    {
+        var data=Read();
+        if(state=="installed" || state=="declined" || state=="failed") data["recommendedPlugins"]=state;
+        else data.Remove("recommendedPlugins");
+        Write(data);
+    }
+
     // Keep a short audit trail so the user's last window operations can be
     // inspected in desktop-preferences.json instead of only in desktop.log.
     internal static void RecordCloseAction(string action, bool remembered)

@@ -53,7 +53,8 @@ jobs:
           ./packaging/build-portable.ps1 `
             -Version '${{ steps.version.outputs.version }}' `
             -DshVersion '${{ steps.version.outputs.dsh }}' `
-            -NodeVersion '${{ steps.version.outputs.node }}'
+            -NodeVersion '${{ steps.version.outputs.node }}' `
+            -BundleWebView2
 
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@v4

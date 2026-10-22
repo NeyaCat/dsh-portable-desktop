@@ -2,8 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const os = require('node:os');
 const { catalogue, atomicJson, resolveRuntime, acquireLock } = require('./update-worker.cjs');
+async function testTemp(prefix) {
+  const base = path.join(process.cwd(), '.test-tmp');
+  await fs.mkdir(base, { recursive: true });
+  return fs.mkdtemp(path.join(base, prefix));
+}
 
 test('registry filtering, prerelease semantic ordering, recommended and engine checks', () => {
   const metadata = { 'dist-tags': { latest: '1.0.0-rc.10' }, versions: {
@@ -23,7 +27,7 @@ test('registry filtering, prerelease semantic ordering, recommended and engine c
 });
 
 test('only ready runtimes activate, old snapshots stay pinned, corruption falls back', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-update-test-'));
+  const root = await testTemp('dsh-update-test-');
   const manifest = dir => path.join(dir, 'node_modules/@deepseek-ai/dsh/package.json');
   await atomicJson(manifest(root), { version: '1.0.0' });
   const old = resolveRuntime(root);
@@ -43,7 +47,7 @@ test('only ready runtimes activate, old snapshots stay pinned, corruption falls 
 });
 
 test('installer lock excludes concurrent workers and releases for the next task', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-lock-test-'));
+  const root = await testTemp('dsh-lock-test-');
   const first = await acquireLock(root);
   await assert.rejects(acquireLock(root), /另一个版本安装/);
   await new Promise(resolve => first.close(resolve));
@@ -52,7 +56,7 @@ test('installer lock excludes concurrent workers and releases for the next task'
 });
 
 test('selection publication remains complete while another launcher reads it', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-atomic-test-'));
+  const root = await testTemp('dsh-atomic-test-');
   const file = path.join(root, 'selection.json');
   await atomicJson(file, { version: 'old' });
   let done = false;
@@ -69,7 +73,7 @@ const { spawn } = require('node:child_process');
 const { promoteDirectory, observeClose, stopValidation } = require('./update-worker.cjs');
 
 test('directory promotion retries a real Windows process cwd lock after process close', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-promotion-test-'));
+  const root = await testTemp('dsh-promotion-test-');
   const source = path.join(root, '.staging-test'), target = path.join(root, 'ready-test');
   await fs.mkdir(source);
   await fs.writeFile(path.join(source, 'ready.json'), '{"version":"test"}');
@@ -90,7 +94,7 @@ test('directory promotion retries a real Windows process cwd lock after process 
 });
 
 test('persistent directory locks stop after bounded retries and retain recoverable files', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-busy-test-'));
+  const root = await testTemp('dsh-busy-test-');
   const source = path.join(root, '.staging-test'), target = path.join(root, 'ready-test');
   await fs.mkdir(source);
   const selection = path.join(root, 'next.json');

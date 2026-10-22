@@ -16,6 +16,7 @@ internal static class VersionSwitch
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        if (!EnvironmentCheck.EnsureReady()) return;
         Application.Run(new VersionWindow());
     }
 }
@@ -126,7 +127,8 @@ internal sealed class VersionWindow : Form
     private async Task Initialize()
     {
         try {
-            var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(Updates.Root, "data", "version-switch-webview"));
+            var env = await RuntimeEnvironment.CreateWebView2EnvironmentAsync(
+                Path.Combine(Updates.Root, "data", "version-switch-webview"));
             if (IsDisposed) return;
             await web.EnsureCoreWebView2Async(env);
             web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;

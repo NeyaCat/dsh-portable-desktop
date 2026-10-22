@@ -102,6 +102,14 @@ internal sealed class ProxyBridge : IDisposable
         }
     }
 
+    // A profile can be created after Initialize() (fresh first-run install), so
+    // write the marker-fenced .npmrc once more without starting a second watcher.
+    internal string SyncNow()
+    {
+        try { return SyncNpmrc(Current); }
+        catch (Exception error) { Log("ProxyBridge: npmrc sync failed: " + error.Message); return "failed"; }
+    }
+
     // Environment the backend (and every pnpm it spawns through dsh-market)
     // inherits. A direct or unset policy removes inherited proxies instead of
     // leaving a stale one from the launching shell.
@@ -687,7 +695,8 @@ internal static class ProxyBridgeSelfTest
     {
         var failures = new List<string>();
         var passes = new List<string>();
-        string root = Path.Combine(Path.GetTempPath(), "dsh-proxy-bridge-test-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", ".verify",
+            "dsh-proxy-bridge-test-" + Guid.NewGuid().ToString("N"));
         string home = Path.Combine(root, "home");
         string profile = Path.Combine(home, "profiles", "web");
         Action<string> log = delegate(string message) { WriteLog(message); };

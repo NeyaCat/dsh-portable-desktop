@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# 默认忽略整个目录，再逐个放行源码。
+# 这是 21 GB 的便携运行目录：data/ 含 API Key，node_modules/、versions/、
+# environments/ 是运行时。白名单以外的一切都不进 Git。
+# ---------------------------------------------------------------------------
+/*
+!/.gitignore
+!/LICENSE
+!/README.md
+!/PRIVACY.md
+!/CODE_SIGNING_POLICY.md
+!/DeepSeek Harness.ico
+!/.github/
+!/desktop/
+
+# desktop/ 只收源码：不收备份目录、截图、编译产物、测试输出
+/desktop/*
+!/desktop/*.cs
+!/desktop/*.cjs
+!/desktop/*.js
+!/desktop/*.html
+!/desktop/*.ps1
+!/desktop/vendor/
+
+# vendor/ 只收构建必需的 WebView2 SDK 文件及其许可证
+/desktop/vendor/*
+!/desktop/vendor/webview2/
+
+/desktop/vendor/webview2/*
+!/desktop/vendor/webview2/LICENSE.txt
+!/desktop/vendor/webview2/NOTICE.txt
+!/desktop/vendor/webview2/lib/
+!/desktop/vendor/webview2/runtimes/
+
+/desktop/vendor/webview2/lib/*
+!/desktop/vendor/webview2/lib/net462/
+
+/desktop/vendor/webview2/lib/net462/*
+!/desktop/vendor/webview2/lib/net462/*.dll
+
+/desktop/vendor/webview2/runtimes/*
+!/desktop/vendor/webview2/runtimes/win-x64/
+
+/desktop/vendor/webview2/runtimes/win-x64/*
+!/desktop/vendor/webview2/runtimes/win-x64/native/
+
+/desktop/vendor/webview2/runtimes/win-x64/native/*
+!/desktop/vendor/webview2/runtimes/win-x64/native/WebView2Loader.dll
+
+# 编译只引用 Core / WinForms / Loader，不需要 WPF 封装
+/desktop/vendor/webview2/lib/net462/Microsoft.Web.WebView2.Wpf.dll

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>版本管理</title>
+<style>
+/* Last-resort palette. The host installs the cached DSH skin as inline custom
+   properties at document creation, which always wins over this :root block. */
+:root{--bg:#151517;--surface:#232324;--surface-2:#2c2c2e;--surface-3:#353638;--text:#ebeef2;--muted:#adb2b8;--tertiary:#81858c;--accent:#5686fe;--soft:rgba(86,134,254,0.16);--on-accent:#ffffff;--border:rgba(255,255,255,0.12);--hover:rgba(255,255,255,0.08);--focus:#5686fe;--danger:#ec1313;--success:#22c55e;--warn:#f59e0b;--radius-sm:8px;--radius:12px;--radius-lg:16px;--font:"Segoe UI","Microsoft YaHei UI",sans-serif;--font-size:14px;--shadow:none;--wallpaper:none;color-scheme:dark}
+[hidden]{display:none!important}*{box-sizing:border-box}
+body{margin:0;background-color:var(--bg);background-image:var(--wallpaper);background-size:cover;background-attachment:fixed;color:var(--text);font-family:var(--font);font-size:var(--font-size);line-height:1.6;height:100vh;display:flex;flex-direction:column}
+header{padding:26px 30px 18px;border-bottom:1px solid var(--border);background:linear-gradient(120deg,var(--soft),transparent 65%)}
+.eyebrow{font-size:11px;letter-spacing:2px;color:var(--accent);font-weight:600}h1{font-size:25px;margin:3px 0 5px;font-weight:650}p{margin:0;color:var(--muted)}
+.summary{display:flex;gap:12px;margin-top:18px}.summary>div{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;box-shadow:var(--shadow)}.summary label{display:block;color:var(--muted);font-size:12px}.summary strong{font-size:17px;letter-spacing:.3px}.summary .current{border-color:var(--accent)}
+.toolbar{padding:16px 30px 10px;display:flex;align-items:center;gap:12px}.toolbar input{flex:1;min-width:80px}button,input{font:inherit;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px}input:focus{outline:2px solid var(--focus);outline-offset:1px}button{cursor:pointer;transition:background .15s}button:hover:not(:disabled){background:var(--hover)}button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}button:disabled{opacity:.45;cursor:default}#count{font-size:12px;color:var(--tertiary);white-space:nowrap}
+main{overflow:auto;flex:1;padding:4px 30px 20px;scrollbar-color:var(--border) transparent}.row{width:100%;display:flex;align-items:center;gap:15px;text-align:left;padding:14px 16px;margin:7px 0;border-radius:var(--radius);position:relative;min-height:74px;background:var(--surface);box-shadow:var(--shadow)}.row[data-selected=true]{outline:2px solid var(--accent);outline-offset:-2px;background:var(--soft)}.row.running{border-left:4px solid var(--accent)}.radio{width:17px;height:17px;border:1px solid var(--muted);border-radius:50%;flex:none}.row[data-selected=true] .radio{border:5px solid var(--accent)}.version{font-size:16px;font-weight:600}.detail{color:var(--tertiary);font-size:12px}.badges{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}.badge{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--hover);color:var(--muted);white-space:nowrap}.badge.active{background:var(--accent);color:var(--on-accent)}.badge.danger{border:1px solid var(--danger);color:var(--danger);background:transparent}.empty{padding:40px;text-align:center;color:var(--muted)}
+footer{padding:15px 30px 18px;border-top:1px solid var(--border);background:var(--surface)}.actions{display:flex;gap:20px;align-items:center;justify-content:space-between}#status{font-size:13px;overflow-wrap:anywhere}#install{flex:none;background:var(--accent);color:var(--on-accent);border-color:transparent;min-width:142px;font-weight:600}#install:hover:not(:disabled){filter:brightness(1.08)}.note{font-size:11px;color:var(--tertiary);margin-top:10px}.progress{height:2px;background:var(--accent);animation:pulse 1.2s ease-in-out infinite}.progress[hidden]{display:none}@keyframes pulse{50%{opacity:.25}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Neutral outlines follow the skin foreground, not its brand accent. */
+header{background:transparent}.eyebrow{color:var(--muted)}
+.summary .current{border-color:var(--text)}
+button{background:transparent;border-color:color-mix(in srgb,var(--text) 45%,transparent)}
+.row[data-selected=true]{outline-color:var(--text);background:var(--hover)}
+.row.running{border-left-color:var(--text)}.row[data-selected=true] .radio{border-color:var(--text)}
+.badge.active{background:transparent;color:var(--text);border:1px solid currentColor}
+#install{background:transparent;color:var(--text);border-color:var(--text)}
+#plan{border-color:var(--text)!important}.progress{background:var(--text)}
+button:focus-visible,input:focus{outline-color:var(--text)}
+#caption{height:30px;flex:none;display:flex;align-items:center;background:transparent;user-select:none;padding-left:12px;font-size:12px}
+#caption .caption-title{flex:1;display:flex;align-items:center;gap:8px;height:100%}
+#caption img{width:16px;height:16px;filter:brightness(0) invert(1)}
+:root[data-scheme=light] #caption img{filter:brightness(0)}
+#caption button{width:46px;height:30px;padding:0;border:0;border-radius:0;color:var(--text);background:transparent;line-height:1}
+#caption button:hover{background:var(--hover)}#caption #window-close:hover{background:#c42b1c;color:white}
+.resize-edge{position:fixed;z-index:100;height:5px;width:5px}.resize-edge.n{top:0;left:6px;right:6px;width:auto;cursor:n-resize}.resize-edge.s{bottom:0;left:6px;right:6px;width:auto;cursor:s-resize}.resize-edge.w{left:0;top:6px;bottom:6px;height:auto;cursor:w-resize}.resize-edge.e{right:0;top:6px;bottom:6px;height:auto;cursor:e-resize}.resize-edge.nw{top:0;left:0;cursor:nw-resize}.resize-edge.ne{top:0;right:0;cursor:ne-resize}.resize-edge.sw{bottom:0;left:0;cursor:sw-resize}.resize-edge.se{bottom:0;right:0;cursor:se-resize}
+/* Compact layout: information scrolls away; search/actions remain pinned. */
+main{padding:0 20px 10px;min-height:0;scroll-padding-top:90px}
+header{padding:12px 0 10px;border:0}.eyebrow{display:none}h1{font-size:19px;margin:0 0 2px}header>p{font-size:12px}
+.summary{margin-top:8px;gap:10px}.summary>div{padding:5px 10px;display:flex;align-items:center;gap:10px;border-width:1px;border-color:var(--border);box-shadow:none}.summary .current{border-color:var(--border)}.summary label{font-size:11px}.summary strong{font-size:13px}
+.sticky-tools{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0;border-bottom:1px solid var(--border)}
+.toolbar{padding:3px 0;gap:8px;flex-wrap:wrap}.toolbar input{flex:1}.toolbar button,button,input{font-size:12px;line-height:18px;padding:4px 9px;border-width:1px;border-radius:var(--radius-sm)}input{height:28px}input[type=checkbox]{height:auto}
+button{border-color:color-mix(in srgb,var(--text) 28%,transparent)}
+.row{min-height:52px;padding:7px 11px;margin:6px 0;gap:10px;border:1px solid var(--border);box-shadow:none;border-radius:var(--radius-sm)}
+.row.running{border-left-width:1px;border-left-color:var(--border)}
+.row[data-selected=true]{outline:none;border:1px solid color-mix(in srgb,var(--text) 55%,transparent);background:var(--hover)}
+.row:focus-visible{outline:1px solid var(--text);outline-offset:1px}
+.radio{width:12px;height:12px;border-width:1px}.row[data-selected=true] .radio{border:1px solid var(--text);background:var(--text);box-shadow:inset 0 0 0 3px var(--surface)}
+.version{font-size:13px}.detail{font-size:11px}.badge{font-size:10px;padding:1px 6px}.badges{gap:4px}.analyze{flex:none;white-space:nowrap}
+footer{padding:6px 20px;background:transparent}.actions{gap:8px}#status{font-size:11px;line-height:16px}.note{font-size:10px;margin-top:2px;line-height:14px}
+#caption{height:28px}#caption button{height:28px}
+#plan{padding:12px!important;margin-top:8px}#plan h2{font-size:16px;margin:0 0 6px}
+</style></head><body>
+<div id="caption"><div class="caption-title"><img id="caption-icon" alt=""><span>DeepSeek Harness - 版本管理</span></div><button id="window-min" aria-label="最小化">—</button><button id="window-max" aria-label="最大化或还原">□</button><button id="window-close" aria-label="关闭">×</button></div>
+<main id="content"><header><div class="eyebrow">DEEPSEEK HARNESS</div><h1>版本管理</h1><p>选择版本，确认插件变化，后台准备后重启应用。</p><div class="summary"><div class="current"><label id="current-label">当前版本</label><strong id="current">读取中…</strong></div><div><label>下次启动</label><strong id="next">读取中…</strong></div></div></header>
+<div class="sticky-tools"><div class="toolbar"><input id="search" aria-label="搜索版本" placeholder="搜索版本号…" autocomplete="off"><span id="count">查询中</span><button id="refresh">刷新版本</button></div>
+<div class="toolbar"><button id="releases-tab">发行版本</button><button id="env-tab">我的环境 / 恢复点</button><button id="cleanup-cache">清理缓存</button><button id="cancel-pending" hidden>取消待切换</button><button id="recover" hidden>恢复上一环境</button></div>
+</div><section id="plan" hidden style="border:1px solid var(--accent);border-radius:var(--radius);padding:18px;margin-bottom:16px"><h2 id="plan-title"></h2><p id="data-notice"></p><p id="validation"></p><div id="changes"></div><label id="fresh-option" hidden style="display:block;margin:14px 0"><input type="checkbox" id="fresh-plugins"> 新增插件若有兼容版本，按默认配置带回（其原有私有数据仍留在新环境）</label><label style="display:block;margin:14px 0"><input type="checkbox" id="ack"> 我已了解上述插件与数据变化</label><button id="confirm-plan">确认并后台准备</button><button id="dismiss-plan">暂不处理</button></section><section id="env-list" hidden></section><section id="list" aria-label="发行版本"><div class="empty">正在加载官方版本列表…</div></section></main>
+<div id="progress" class="progress" hidden></div><footer><div class="actions"><p id="status" role="status" aria-live="polite">正在连接版本服务…</p></div><p class="note">来自官方 npm · 已隐藏弃用版本；未弃用不代表持续维护。切换前保存恢复点；无法安全迁移的数据不会自动覆盖。</p></footer>
+<script>
+const $=id=>document.getElementById(id), send=message=>window.chrome.webview.postMessage(message);
+$('caption-icon').src=window.__captionIcon||'';
+$('caption').querySelector('.caption-title').onmousedown=e=>{if(e.button===0)send('window:drag')};
+$('caption').querySelector('.caption-title').ondblclick=()=>send('window:max');
+for(const action of ['min','max','close'])$('window-'+action).onclick=()=>send('window:'+action);
+for(const [edge,hit] of Object.entries({w:10,e:11,n:12,nw:13,ne:14,s:15,sw:16,se:17})){const el=document.createElement('div');el.className='resize-edge '+edge;el.onmousedown=e=>{if(e.button===0)send('window:resize:'+hit)};document.body.append(el)}
+let rows=[], running='', next='', chosen='', busy=true;
+let currentPlan=null, envData=null;
+let cleanupTicket=null;
+// JSON skin keys from the host cache -> the CSS custom properties above.
+const THEME={bg:'--bg',surface:'--surface',surface2:'--surface-2',surface3:'--surface-3',text:'--text',muted:'--muted',tertiary:'--tertiary',accent:'--accent',soft:'--soft',onAccent:'--on-accent',border:'--border',hover:'--hover',focus:'--focus',danger:'--danger',success:'--success',warn:'--warn',radiusSm:'--radius-sm',radius:'--radius',radiusLg:'--radius-lg',font:'--font',fontSize:'--font-size',shadow:'--shadow',wallpaper:'--wallpaper'};
+function applySkin(theme){if(!theme)return;for(const key in THEME){const value=theme[key];if(typeof value==='string'&&value)document.documentElement.style.setProperty(THEME[key],value)}document.documentElement.style.colorScheme=theme.scheme==='light'?'light':'dark';document.documentElement.dataset.scheme=theme.scheme==='light'?'light':'dark'}
+function buttons(){ $('refresh').disabled=busy; for(const b of document.querySelectorAll('.analyze'))b.disabled=busy||b.dataset.compatible!=='true'; $('progress').hidden=!busy; $('confirm-plan').disabled=busy||!$('ack').checked;for(const el of document.querySelectorAll('[data-env-action],#cancel-pending,#recover'))el.disabled=busy; }
+function badge(text,active,danger){const el=document.createElement('span');el.className='badge'+(active?' active':'')+(danger?' danger':'');el.textContent=text;return el}
+function render(){
+ $('current-label').textContent=running?'当前运行':'当前版本（DSH 未运行）'; $('current').textContent=running||next||'未知';$('next').textContent=next||'未知';
+ const filtered=rows.filter(r=>r.version.toLowerCase().includes($('search').value.toLowerCase().trim()));$('count').textContent=filtered.length+' / '+rows.length+' 个版本';
+ $('list').replaceChildren();
+ for(const row of filtered){const el=document.createElement('div');el.tabIndex=0;el.setAttribute('role','group');el.setAttribute('aria-label','版本 '+row.version);el.className='row'+(row.version===(running||next)?' running':'');el.dataset.version=row.version;el.dataset.selected=String(chosen===row.version);
+ const radio=document.createElement('span');radio.className='radio';const info=document.createElement('div');const name=document.createElement('div');name.className='version';name.textContent=row.version;const detail=document.createElement('div');detail.className='detail';detail.textContent=(row.published||'').slice(0,10)+' · '+row.channel;info.append(name,detail);const badges=document.createElement('div');badges.className='badges';
+ if(row.version===(running||next))badges.append(badge(running?'当前运行':'当前版本',true));if(row.version===next&&next!==running&&running)badges.append(badge('下次启动',true));if(row.channel.includes('推荐'))badges.append(badge('推荐'));if(!row.compatible)badges.append(badge('Node 不兼容',false,true));
+ const analyze=document.createElement('button');analyze.className='analyze';analyze.textContent='分析版本';analyze.dataset.compatible=String(row.compatible);analyze.setAttribute('aria-label','分析版本 '+row.version);analyze.onclick=e=>{e.stopPropagation();if(!busy&&row.compatible){chosen=row.version;operation('install:'+row.version)}};el.append(radio,info,badges,analyze);el.onkeydown=e=>{if(e.target===el&&(e.key==='Enter'||e.key===' ')){e.preventDefault();el.click()}};el.onclick=()=>{if(!busy){chosen=row.version;render();$('list').querySelector('[data-selected=true]')?.focus({preventScroll:true})}};$('list').append(el);}
+ if(!filtered.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=rows.length?'没有匹配的版本':'暂无版本，请刷新重试';$('list').append(empty)}buttons();
+}
+$('search').oninput=render;$('refresh').onclick=()=>send('refresh');
+function operation(command){if(busy)return;busy=true;buttons();send(command)}
+$('ack').onchange=buttons;$('confirm-plan').onclick=()=>{if(currentPlan&&$('ack').checked)operation('prepare:'+currentPlan.id+($('fresh-plugins').checked?':fresh':''))};$('dismiss-plan').onclick=()=>{$('plan').hidden=true};
+$('releases-tab').onclick=()=>{$('list').hidden=false;$('env-list').hidden=true};
+$('env-tab').onclick=()=>{$('list').hidden=true;$('env-list').hidden=false;operation('environments')};
+$('cancel-pending').onclick=()=>operation('cancel');
+$('cleanup-cache').onclick=()=>operation('cleanup-preview');
+$('recover').onclick=()=>{if(confirm('将切回上一环境；当前候选数据仍保留。请先关闭 DSH。继续？'))operation('recover')};
+function showPlan(plan){currentPlan=plan;$('plan').hidden=false;$('ack').checked=false;$('fresh-plugins').checked=false;$('fresh-option').hidden=!plan.changes.some(c=>c.freshAction);$('plan-title').textContent='切换到 '+plan.target.version+' · '+(plan.mode==='strict'?'严格恢复':plan.mode==='compatible-rollback'?'兼容回滚':'联动升级');$('data-notice').textContent=plan.dataNotice;$('validation').textContent=plan.validation+(plan.configDifferences?.length?' 配置存在差异：'+plan.configDifferences.join('、')+'；将使用所选恢复点配置，当前配置仍保留。':'');$('changes').replaceChildren();const labels={keep:'保留',replace:'替换',suspend:'暂停',disabled:'保持禁用'};for(const c of plan.changes){const p=document.createElement('p');p.style.marginTop='10px';p.textContent=labels[c.action]+' · '+c.name+' '+c.version+(c.targetVersion?' → '+c.targetVersion:'')+'：'+c.reason;$('changes').append(p)}buttons();$('content').scrollTop=0;}
+function envButton(text,command){const b=document.createElement('button');b.textContent=text;b.dataset.envAction='true';b.onclick=()=>operation(command);return b}
+function showEnvironments(data){envData=data;$('cancel-pending').hidden=!data.state?.pending;$('recover').hidden=!data.state?.previous;$('env-list').replaceChildren();
+ for(const env of data.environments){const card=document.createElement('div');card.className='row';card.style.display='block';const title=document.createElement('strong');title.textContent=env.version+' · '+(env.active?'当前环境':env.previous?'上一环境':'保留环境')+' · '+env.createdAt.slice(0,19);card.append(title);if(!env.active&&['healthy','existing'].includes(env.health)){const open=envButton('切换到此保留环境','open-environment:'+env.id);open.onclick=()=>{if(confirm('将使用此环境保存的会话和配置。当前环境数据仍保留。请先关闭 DSH，再继续。'))operation('open-environment:'+env.id)};card.append(open)}for(const p of env.plugins||[]){const line=document.createElement('p');line.textContent=p.name+' '+p.version+(p.suspended?' · 已暂停：'+p.reason:p.enabled?'':' · 已禁用');if(env.active)line.append(envButton(data.policies?.[p.name]?.pinned?'解除固定':'固定版本','pin:'+p.name+':'+!data.policies?.[p.name]?.pinned));card.append(line)}$('env-list').append(card)}
+ const title=document.createElement('h2');title.textContent='一致性恢复点';$('env-list').append(title);
+ for(const snapshot of data.snapshots){const card=document.createElement('div');card.className='row';const label=document.createElement('span');label.textContent=snapshot.runtime.version+' · '+snapshot.createdAt.slice(0,19)+' · '+Math.ceil(snapshot.bytes/1048576)+' MB';card.append(label,envButton('兼容回滚','restore:'+snapshot.id+':compatible'),envButton('严格恢复','restore:'+snapshot.id+':strict'));$('env-list').append(card)}
+ if(!data.snapshots.length){const p=document.createElement('p');p.textContent='首次切换前会自动创建一致性恢复点。';$('env-list').append(p)}buttons();}
+window.chrome.webview.addEventListener('message',({data:m})=>{
+ if(m.type==='plan')showPlan(m.plan);
+ if(m.type==='plan-done'){$('plan').hidden=true;currentPlan=null;}
+ if(m.type==='environments')showEnvironments(m.data);
+ if(m.type==='cleanup-preview')cleanupTicket=m.data;
+ if(m.type==='theme')applySkin(m.theme);
+ if(m.type==='catalog'){rows=m.data.versions;next=m.data.selected.version;running=m.running;chosen=chosen||running||next;render();}
+ if(m.type==='selection'){next=m.selected.version;running=m.running;render();}
+ if(m.type==='status'){busy=m.busy;$('status').textContent=m.text;buttons();if(!busy&&cleanupTicket){const ticket=cleanupTicket;cleanupTicket=null;if(!ticket.items.length)$('status').textContent='没有可清理的下载缓存；环境和恢复点均已保留。';else if(confirm(ticket.notice+'\n预计释放 '+Math.ceil(ticket.bytes/1048576)+' MB，确认清理？'))operation('cleanup:'+ticket.id);}}
+});send('ready');
+</script></body></html>

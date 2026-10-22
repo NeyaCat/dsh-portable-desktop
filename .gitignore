@@ -49,3 +49,12 @@
 
 # 编译只引用 Core / WinForms / Loader，不需要 WPF 封装
 /desktop/vendor/webview2/lib/net462/Microsoft.Web.WebView2.Wpf.dll
+
+# 构建脚本目录
+!/packaging/
+
+# plugin-tools 只收清单，pnpm 由构建脚本按锁文件安装
+!/desktop/plugin-tools/
+/desktop/plugin-tools/*
+!/desktop/plugin-tools/package.json
+!/desktop/plugin-tools/package-lock.json

@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading "v"
+        required: true
+        default: '0.1.0'
+      dsh_version:
+        description: DSH version to bundle
+        required: true
+        default: '0.2.0-rc.2'
+      node_version:
+        description: Node.js version to bundle
+        required: true
+        default: 'v24.19.0'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows x64 package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve versions
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $version = '${{ inputs.version }}'
+            $dsh = '${{ inputs.dsh_version }}'
+            $node = '${{ inputs.node_version }}'
+          } else {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+            $dsh = '0.2.0-rc.2'
+            $node = 'v24.19.0'
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "dsh=$dsh" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "node=$node" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          ./packaging/build-portable.ps1 `
+            -Version '${{ steps.version.outputs.version }}' `
+            -DshVersion '${{ steps.version.outputs.dsh }}' `
+            -NodeVersion '${{ steps.version.outputs.node }}'
+
+      - name: Upload unsigned artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DSH-Portable-unsigned-${{ steps.version.outputs.version }}
+          path: out/DSH-Portable-${{ steps.version.outputs.version }}-win-x64.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "out/DSH-Portable-${{ steps.version.outputs.version }}-win-x64.zip"
+          gh release create $env:GITHUB_REF_NAME $zip `
+            --title "DSH Portable Desktop $env:GITHUB_REF_NAME" `
+            --generate-notes

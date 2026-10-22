@@ -56,14 +56,19 @@ powershell -ExecutionPolicy Bypass -File .\desktop\Build.ps1
 loader next to them, and embeds `DesktopChrome.js` and `VersionSwitch.html` as
 assembly resources.
 
-The portable runtime (Node.js + `@deepseek-ai/dsh`) is downloaded from pinned
-upstream versions when a release is packaged; it is not vendored here.
+The portable runtime (Node.js + `@deepseek-ai/dsh`) is not vendored here. The full
+package — runtime, compiled shell and ZIP — is built by
+`packaging/build-portable.ps1`, which the release workflow runs on GitHub-hosted
+Windows runners. Node.js and DSH are fetched from their official sources and
+verified where the upstream provides checksums.
 
 ```text
 desktop/                  C# sources for the shell and the version manager
 desktop/Build.ps1         compiles both executables with the Windows .NET compiler
 desktop/vendor/webview2   Microsoft WebView2 SDK 1.0.2903.40 with its license files
 desktop/Test-*.ps1        manual integration tests (close the app first)
+packaging/                builds the portable package and ZIP from source
+.github/workflows/        release pipeline
 DeepSeek Harness.ico      application icon passed to the compiler
 ```
 

@@ -1,109 +1,93 @@
-# DSH Portable Desktop (unofficial)
+<div align="center">
 
-> **Unofficial project.** This repository is not affiliated with, endorsed by, or
-> maintained by DeepSeek. "DeepSeek" and "DeepSeek Harness" are trademarks of their
-> respective owners. The bundled DSH runtime and Node.js are third-party
-> open-source components under the MIT license.
+# 🐋 DSH Portable Desktop
 
-DSH Portable Desktop is a self-contained Windows x64 desktop shell for
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH). It hosts
-the local DSH web UI in a native WebView2 window and adds tray behaviour, a
-close-to-tray dialog, skin-aware window chrome and an in-app version manager.
-The DSH runtime and Node.js are fetched from their official upstream sources when
-packaging a release; this repository contains the shell's own source.
+**非官方**的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Windows x64 桌面外壳
 
-## Features
+把本地 DSH Web 界面装进独立窗口，附带托盘、皮肤标题栏、版本管理与插件安装代理桥。
 
-- **Native window** — the DSH UI opens in its own window; no browser tab and no
-  console window.
-- **Single instance** — launching the EXE again restores and focuses the window
-  that is already running.
-- **Close to tray** — `×` offers "exit" or "minimize to tray"; the choice can be
-  remembered.
-- **Tray menu** — open the window, start a new session, open the version manager,
-  or exit.
-- **Skin-aware chrome** — a 28 px in-page title bar follows the active DSH skin,
-  picks a light or dark icon by contrast and keeps native Windows 11 rounded
-  corners and window animations.
-- **Version manager** — `Version Switch.exe` lists and installs official DSH
-  releases into a per-version folder. The running version is never overwritten;
-  updates are offered in-app and applied on the next launch.
-- **Portable** — configuration, sessions, logs and the WebView2 profile live under
-  `data/` next to the executable. Move the folder, move the installation.
-- **Local only** — the UI is served on `127.0.0.1` on a free port; external links
-  open in the default browser.
+[![License](https://img.shields.io/badge/License-MIT-2563eb?style=flat-square)](LICENSE)
+![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078d4?style=flat-square)
+![.NET](https://img.shields.io/badge/.NET%20Framework-4.6.2-512bd4?style=flat-square)
+![WebView2](https://img.shields.io/badge/WebView2-Runtime-2ea44f?style=flat-square)
 
-## Getting started
+</div>
 
-1. Download the latest ZIP from [Releases](https://github.com/NeyaCat/dsh-portable-desktop/releases).
-2. Extract it to a writable folder (not `Program Files`).
-3. Run `DeepSeek Harness.exe`. State is created in `./data`.
+---
 
-Requirements: Windows 10/11 x64, .NET Framework 4.6.2 or later, and the Microsoft
-Edge WebView2 Runtime (included with Windows 11 and current Windows 10 builds).
+> [!WARNING]
+> **本项目为非官方项目。** 与 DeepSeek 无隶属、无背书、无维护关系。「DeepSeek」「DeepSeek Harness」为各自权利人的商标。随包分发的 DSH 运行时与 Node.js 是遵循 MIT 许可的第三方开源组件。
 
-## Build from source
+DSH Portable Desktop 是一个自带运行环境的 Windows x64 桌面外壳：把 DSH 的本地 Web 界面托管在原生 WebView2 窗口里，并补上托盘行为、关闭确认弹窗、跟随皮肤的窗口标题栏和内置版本管理。DSH 运行时与 Node.js 在打包发布版时从官方上游获取，本仓库只包含外壳自身的源码。
 
-The shell is plain C# targeting .NET Framework 4.6.2 and is compiled with the
-compiler that ships with Windows — no Visual Studio or SDK is required.
+## ✨ 功能
+
+| | 能力 | 说明 |
+|---|---|---|
+| 🪟 | **原生窗口** | DSH 界面在自己的窗口里打开，没有浏览器标签页，也没有黑框控制台 |
+| 🔂 | **单实例** | 再次双击 EXE 会还原并聚焦已在运行的窗口，不会开第二份 |
+| 📥 | **关闭到托盘** | 点 `×` 时可选「退出」或「最小化到托盘」，选择可记住 |
+| 🧭 | **托盘菜单** | 打开窗口、新建会话、打开版本管理、退出 |
+| 🎨 | **皮肤感知标题栏** | 28 px 页内标题栏跟随当前 DSH 皮肤，按对比度自动选深浅图标，保留 Windows 11 圆角与窗口动画 |
+| 🔀 | **版本管理** | `Version Switch.exe` 列出并安装官方 DSH 发行版，运行中的版本永不被覆盖；更新在应用内提示，下次启动生效 |
+| 🌐 | **安装代理桥** | 读取 `dsh-network-config` 的网络模式，把代理同时交给后端进程与每个 profile 的 `.npmrc`，并让 git 的 GitHub SSH 地址改写为 HTTPS；`direct` 模式会清除这些设置 |
+| 🧹 | **残留锁自愈** | 启动时清理被中断的安装留下的 `.plugin-manager/run.json` 与 `package.json.lock`（PID 已退出且记录超过 2 分钟才动） |
+| 📦 | **便携** | 配置、会话、日志与 WebView2 数据都在 EXE 旁的 `data/`；整个文件夹搬走就是搬家 |
+| 🔒 | **仅本机** | 界面只监听 `127.0.0.1` 的随机空闲端口；外部链接交给默认浏览器 |
+
+## 🚀 快速开始
+
+1. 从 [Releases](https://github.com/NeyaCat/dsh-portable-desktop/releases) 下载最新的 ZIP；
+2. 解压到**可写**目录（不要放 `Program Files`）；
+3. 双击 `DeepSeek Harness.exe`，运行数据会生成在 `./data`。
+
+**运行要求**：Windows 10/11 x64、.NET Framework 4.6.2 或更高、Microsoft Edge WebView2 Runtime（Windows 11 和较新的 Windows 10 已内置）。
+
+**卸载**：退出程序后直接删除整个文件夹即可 —— 不写注册表，不在系统目录留东西。
+
+## 🧱 从源码构建
+
+外壳是纯 C#，目标 .NET Framework 4.6.2，用 Windows 自带的编译器构建，**不需要 Visual Studio 或 SDK**。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\desktop\Build.ps1
 ```
 
-`desktop\Build.ps1` compiles `desktop\*.cs` into `DeepSeek Harness.exe` and
-`Version Switch.exe` in the repository root, copies the WebView2 SDK DLLs and the
-loader next to them, and embeds `DesktopChrome.js` and `VersionSwitch.html` as
-assembly resources.
+`desktop\Build.ps1` 会把 `desktop\*.cs` 编译成根目录的 `DeepSeek Harness.exe` 与 `Version Switch.exe`，把 WebView2 SDK 的 DLL 和 loader 复制到旁边，并把 `DesktopChrome.js`、`VersionSwitch.html` 作为程序集资源嵌入。
 
-The portable runtime (Node.js + `@deepseek-ai/dsh`) is not vendored here. The full
-package — runtime, compiled shell and ZIP — is built by
-`packaging/build-portable.ps1`, which the release workflow runs on GitHub-hosted
-Windows runners. Node.js and DSH are fetched from their official sources and
-verified where the upstream provides checksums.
+便携运行时（Node.js + `@deepseek-ai/dsh`）不随仓库提供。完整包（运行时 + 已编译外壳 + ZIP）由 `packaging/build-portable.ps1` 产出，发布流水线在 GitHub 托管的 Windows runner 上执行；Node.js 与 DSH 均从官方来源获取，并在上游提供校验和时进行校验。
 
 ```text
-desktop/                  C# sources for the shell and the version manager
-desktop/Build.ps1         compiles both executables with the Windows .NET compiler
-desktop/vendor/webview2   Microsoft WebView2 SDK 1.0.2903.40 with its license files
-desktop/Test-*.ps1        manual integration tests (close the app first)
-packaging/                builds the portable package and ZIP from source
-.github/workflows/        release pipeline
-DeepSeek Harness.ico      application icon passed to the compiler
+desktop/                 外壳与版本管理的 C# 源码
+desktop/Build.ps1        用 Windows .NET 编译器构建两个可执行文件
+desktop/vendor/webview2  Microsoft WebView2 SDK 1.0.2903.40 及其许可证
+desktop/Test-*.ps1       手动集成测试（运行前请先关闭程序）
+packaging/               从源码构建便携包与 ZIP
+.github/workflows/       发布流水线
+DeepSeek Harness.ico     传给编译器的程序图标
 ```
 
-## Code signing policy
+## 🧪 自测
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\Test-ProxyBridge.ps1   # 代理桥，无需关闭程序
+powershell -ExecutionPolicy Bypass -File .\desktop\Test-Desktop.ps1       # 窗口与进程生命周期，需先关闭程序
+```
 
-- Authors / committers: [@NeyaCat](https://github.com/NeyaCat)
-- Reviewers: [@NeyaCat](https://github.com/NeyaCat)
-- Approvers: [@NeyaCat](https://github.com/NeyaCat)
+## 🔐 代码签名策略
 
-Releases are built by GitHub Actions from this repository and every signing
-request is manually approved. See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
+免费代码签名由 [SignPath.io](https://about.signpath.io) 提供，证书由 [SignPath Foundation](https://signpath.org) 签发。
 
-## Privacy
+- 作者 / 提交者：[@NeyaCat](https://github.com/NeyaCat)
+- 审核者：[@NeyaCat](https://github.com/NeyaCat)
+- 批准者：[@NeyaCat](https://github.com/NeyaCat)
 
-This program does not send telemetry or usage data to the maintainer. It contacts
-other networked systems only when the user configures a model provider, uses
-online features, or checks for DSH updates. See [PRIVACY.md](PRIVACY.md).
+发布版本由 GitHub Actions 从本仓库构建，每一次签名请求都需人工批准。详见 [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md)。
 
-## License
+## 🛡️ 隐私
 
-MIT — see [LICENSE](LICENSE). Bundled third-party components keep their own
-licenses.
+本程序不向维护者上报遥测或使用数据。只有在你自己配置了模型服务、使用联网功能或检查 DSH 更新时，它才会访问其他网络服务。详见 [PRIVACY.md](PRIVACY.md)。
 
-## 中文说明
+## 📜 许可证
 
-这是一个**非官方**的 DeepSeek Harness（DSH）Windows x64 桌面外壳：把本地 DSH Web
-界面放进独立窗口，并加上系统托盘、关闭确认弹窗、跟随皮肤的标题栏和版本管理。
-它不是 DeepSeek 官方项目，也不代表 DeepSeek。
-
-- **用法**：解压 ZIP 到可写目录，双击 `DeepSeek Harness.exe`；`Version Switch.exe`
-  用于查询和切换 DSH 发行版本。
-- **数据**：`data/` 保存 DSH 配置、会话、日志和 WebView2 数据；`workspace/` 是推荐工作区。
-- **卸载**：退出程序后删除整个文件夹即可，不写注册表、不留系统目录。
-- **隐私**：不向维护者上报任何数据；只有你配置的模型服务、在线插件和更新检查会联网。
-- **源码**：本仓库包含全部自研源码；DSH 与 Node.js 是按 MIT 许可分发的第三方组件。
+MIT —— 见 [LICENSE](LICENSE)。随包分发的第三方组件各自保留其许可。

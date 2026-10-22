@@ -31,6 +31,13 @@ internal static class Program
         }
         if (Array.IndexOf(args,"--verify-exit-settings") >= 0)
             DesktopPreferences.FilePath = Path.Combine(Path.GetTempPath(),"dsh-preferences-test-"+Guid.NewGuid()+".json");
+        // Headless self-test of the proxy bridge: no window and no single-instance
+        // mutex, an exit code of 0/1, and PASS/FAIL lines in data/desktop.log.
+        if (Array.IndexOf(args, "--verify-proxy-bridge") >= 0)
+        {
+            Environment.ExitCode = ProxyBridgeSelfTest.Run();
+            return;
+        }
         Run();
     }
 
@@ -103,6 +110,9 @@ internal sealed class DesktopWindow : Form
     private bool forceExit;
     private string runtimeRoot = Program.Root;
     private string environmentHome = Path.Combine(Program.Root,"data"), environmentId = "";
+    // Carries the network mode chosen in the dsh-network-config settings page to
+    // the backend environment and to each profile's .npmrc.
+    private ProxyBridge proxyBridge;
     private bool environmentTrial, checkingEnvironment;
     // A rejected candidate is terminal for this window: without this flag the
     // 90s watchdog and any later ui-ready message would overwrite the specific
@@ -711,7 +721,7 @@ internal sealed class DesktopWindow : Form
             }
             await StartAsync();
         };
-        FormClosed += delegate { closing = true; RemoveTrayIcon(); selectionTimer.Dispose(); StopBackend(); foreach (var popup in popupRelays.ToArray()) popup.Dispose(); popupRelays.Clear(); web.Dispose(); };
+        FormClosed += delegate { closing = true; RemoveTrayIcon(); selectionTimer.Dispose(); StopBackend(); if (proxyBridge != null) { proxyBridge.Dispose(); proxyBridge = null; } foreach (var popup in popupRelays.ToArray()) popup.Dispose(); popupRelays.Clear(); web.Dispose(); };
         selectionTimer.Tick += async delegate {
             if (!updateChecked || installingUpdate || closing) return;
             string stamp = Updates.ReadFile("environments/state.json");
@@ -961,6 +971,10 @@ internal sealed class DesktopWindow : Form
             environmentId=Updates.Value(runtime,"environmentId");
             environmentHome=Updates.Value(runtime,"home");
             if(environmentHome=="") environmentHome=data;
+            // The settings page writes its choice next to this backend's home, so
+            // the bridge reads exactly the file the plugin writes, then follows it.
+            proxyBridge = new ProxyBridge(environmentHome, Log);
+            proxyBridge.Initialize();
             environmentTrial=runtime.ContainsKey("trial") && (bool)runtime["trial"];
             if(runtime.ContainsKey("expectedPlugins")) expectedPlugins=runtime["expectedPlugins"];
             if(runtime.ContainsKey("plugins")) environmentPlugins=runtime["plugins"];
@@ -1234,6 +1248,10 @@ internal sealed class DesktopWindow : Form
         info.EnvironmentVariables["PATH"] = Path.Combine(Program.Root, "node") + ";" + Path.Combine(Program.Root,"desktop","plugin-tools","node_modules",".bin") + ";" + Environment.GetEnvironmentVariable("PATH");
         info.EnvironmentVariables["npm_config_cache"] = Path.Combine(data, "npm-cache");
         info.EnvironmentVariables["NO_COLOR"] = "1";
+        // pnpm ignores HTTP_PROXY and the Windows system proxy, and the settings
+        // page's policy only reached the harness's own HTTP client. This hands the
+        // backend — and every pnpm it spawns — the mode the user picked.
+        if (proxyBridge != null) proxyBridge.ApplyEnvironment(info);
         backend = new Process { StartInfo = info, EnableRaisingEvents = true };
         backend.OutputDataReceived += ReceiveLine;
         backend.ErrorDataReceived += ReceiveLine;

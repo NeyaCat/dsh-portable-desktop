@@ -218,6 +218,12 @@ Bundled: DSH $DshVersion / Node.js $NodeVersion
     [System.IO.Directory]::CreateDirectory((Join-Path $payload 'data')) | Out-Null
     [System.IO.Directory]::CreateDirectory((Join-Path $payload 'workspace')) | Out-Null
 
+    Write-Step 'Including the default plugin set'
+    $defaults = Join-Path $repo 'defaults'
+    if (Test-Path -LiteralPath $defaults) {
+        Copy-Item -LiteralPath $defaults -Destination (Join-Path $payload 'defaults') -Recurse -Force
+    }
+
     Write-Step 'Publishing the package'
     Move-Item -LiteralPath $payload -Destination $OutDir
     Write-Ok "Folder: $OutDir"

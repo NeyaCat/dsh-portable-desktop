@@ -1,0 +1,71 @@
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek-official
+    model: deepseek-flash
+    reasoningEffort: max
+- id: llm-deepseek
+  name: "@deepseek-ai/dsh-llm-deepseek-api-key"
+  config:
+    models:
+      - id: deepseek-v4-flash
+        name: DeepSeek-V4-Flash
+        contextWindow: 1000000
+      - id: deepseek-v4-pro
+        name: DeepSeek-V4-Pro
+        contextWindow: 1000000
+      - id: deepseek-flash
+        name: DeepSeek-V4.1-Flash
+- id: agent-preset-registry
+  name: "@deepseek-ai/dsh-agent-preset-registry"
+  config:
+    default: standard
+    selectedDefault: standard
+- id: permission
+  name: "@deepseek-ai/dsh-permission-presets"
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+    defaultPreset: workspace-write
+- id: ui-theme
+  name: "@deepseek-ai/dsh-client-ui-theme"
+  config:
+    preference: system
+    fontSize: 14
+- id: agency-agents
+  name: "@michengai/dsh-agency-agents"
+  config:
+    enabled:
+      - product-manager
+      - design-ux-researcher
+      - engineering-software-architect
+      - security-appsec-engineer
+      - testing-reality-checker
+      - engineering-data-engineer
+      - support-analytics-reporter
+      - engineering-data-visualization-engineer
+    enabledTeams:
+      - team-product
+      - team-technical
+      - team-data
+- id: dsh-memory
+  name: "@dsh-external/dsh-memory"
+  config:
+    maxBytes: 6000
+    scopedMemory: true
+- id: dsh-at-file
+  name: dsh-at-file
+  config:
+    ignorePastedMentions: true

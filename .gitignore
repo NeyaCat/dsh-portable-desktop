@@ -53,6 +53,9 @@
 # 构建脚本目录
 !/packaging/
 
+# 默认插件清单（首次启动安装的数据来源）
+!/defaults/
+
 # plugin-tools 只收清单，pnpm 由构建脚本按锁文件安装
 !/desktop/plugin-tools/
 /desktop/plugin-tools/*

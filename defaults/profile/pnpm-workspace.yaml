@@ -1,0 +1,6 @@
+packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+storeDir: .pnpm-store

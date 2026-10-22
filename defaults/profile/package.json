@@ -1,0 +1,45 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-dream-skin",
+        "dsh-openspec",
+        "@deepseek-ai/dsh-experimental-auto-review",
+        "dsh-workspace-acl-allow",
+        "dsh-whale-widget",
+        "dsh-at-file",
+        "dsh-better-sidebar",
+        "dsh-notification",
+        "dshmarket",
+        "@nanmicoder/dsh-agent-teams",
+        "@michengai/dsh-agency-agents",
+        "@xbzbing/dsh-git-panel",
+        "@dsh-external/dsh-memory",
+        "dsh-config-manager",
+        "dsh-network-config",
+        "dsh-http-proxy"
+      ]
+    }
+  },
+  "dependencies": {
+    "@dsh-external/dsh-memory": "github:haitang1/dsh-memory",
+    "@michengai/dsh-agency-agents": "1.2.10",
+    "@nanmicoder/dsh-agent-teams": "0.1.26",
+    "@xbzbing/dsh-git-panel": "1.8.2",
+    "dsh-at-file": "^0.6.3",
+    "dsh-better-sidebar": "^0.28.0",
+    "dsh-config-manager": "^0.1.79",
+    "dsh-dream-skin": "^10.21.2",
+    "dsh-http-proxy": "0.1.3",
+    "dsh-network-config": "file:./local-packages/dsh-network-config-1.0.0.tgz",
+    "dsh-notification": "^0.1.2",
+    "dsh-openspec": "github:tamashi486/dsh-openspec",
+    "dsh-whale-widget": "^0.4.2",
+    "dsh-workspace-acl-allow": "github:lovezi0/dsh-workspace-acl-allow",
+    "dshmarket": "^1.66.47"
+  }
+}

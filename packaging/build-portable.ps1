@@ -267,7 +267,7 @@ try {
     Write-Step 'Writing launcher and documentation'
     foreach ($script in @('update-worker.cjs', 'environment-store.cjs',
         'switch-transaction.cjs', 'plugin-resolver.cjs', 'environment-cleanup.cjs',
-        'install-plugins.cjs', 'repair-http-proxy.cjs', 'cache-cleanup.cjs', 'version-transition.cjs')) {
+        'install-plugins.cjs', 'plugin-catalog.cjs', 'portable-plugin-adapters.cjs', 'repair-http-proxy.cjs', 'cache-cleanup.cjs', 'version-transition.cjs')) {
         Copy-Item -LiteralPath (Join-Path $repo "desktop\$script") -Destination (Join-Path $payload 'desktop') -Force
     }
     # Exercise the real worker from the staged package, without network or user data.
@@ -330,6 +330,11 @@ $webviewNote
     if (Test-Path -LiteralPath $defaults) {
         Copy-Item -LiteralPath $defaults -Destination (Join-Path $payload 'defaults') -Recurse -Force
     }
+
+    # First-install admission and adapters must be loadable from the shipped tree.
+    $smokeHome = Join-Path $stage 'installer-smoke'
+    $installerOutput = & $nodeExe (Join-Path $payload 'desktop\install-plugins.cjs') --root $payload --home $smokeHome --dry-run 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "Packaged plugin installer failed: $installerOutput" }
 
     if ($ReleaseNotesFile) {
         Copy-Item -LiteralPath $ReleaseNotesFile -Destination (Join-Path $payload 'CHANGELOG.md')

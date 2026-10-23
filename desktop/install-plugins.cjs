@@ -51,7 +51,7 @@ function copyTree(source, destination) {
     const from = path.join(source, entry.name);
     const to = path.join(destination, entry.name);
     if (entry.isDirectory()) copyTree(from, to);
-    else fs.copyFileSync(from, to);
+    else if (!fs.existsSync(to)) fs.copyFileSync(from, to);
   }
 }
 
@@ -148,9 +148,7 @@ const requested = requestedText === null || flag('--validate-only')
 for (const name of requiredNames) requested.add(name);
 for (const name of requiredNames) if (!allNames.has(name)) fail('required plugin is missing from the manifest: ' + name);
 
-const selected = allPlugins.filter(plugin => requested.has(plugin.name));
-const selectedNames = new Set(selected.map(plugin => plugin.name));
-const optional = selected.filter(plugin => !plugin.required);
+let selected = allPlugins.filter(plugin => requested.has(plugin.name));
 const basePackage = readJson(path.join(defaults, 'package.json'), 'default profile package.json');
 const baseLock = fs.readFileSync(path.join(defaults, 'pnpm-lock.yaml'), 'utf8');
 const baseConfig = fs.readFileSync(path.join(defaults, 'cordis.patch.yml'), 'utf8');
@@ -191,7 +189,12 @@ if (mirrorRequested) {
 }
 const directLock = baseLock.replace(/https:\/\/registry\.npmmirror\.com\//g, 'https://registry.npmjs.org/');
 const lockText = mirrorRequested ? rewriteLock(baseLock, mirrors) : directLock;
-const configText = filterConfig(baseConfig, selectedNames, allNames);
+const configSeed = fs.existsSync(path.join(profile, 'cordis.patch.yml')) ? fs.readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8') : baseConfig;
+const runtimeRoot=path.resolve(argument('--runtime-root',root));
+const target={root:runtimeRoot,version:readJson(path.join(runtimeRoot,'node_modules/@deepseek-ai/dsh/package.json'),'runtime').version};
+const catalog=require('./plugin-catalog.cjs');
+const {adaptPlugin}=require('./portable-plugin-adapters.cjs');
+const skippedNames=new Set();
 
 function writeProfile(selection) {
   copyTree(defaults, profile);
@@ -207,7 +210,9 @@ function writeProfile(selection) {
   if (pkg.dsh && pkg.dsh.profile) pkg.dsh.profile.bundles = filtered;
   fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify(pkg, null, 2) + '\n', 'utf8');
   fs.writeFileSync(path.join(profile, 'pnpm-lock.yaml'), lockText, 'utf8');
-  fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), configText, 'utf8');
+  let config=filterConfig(configSeed,new Set([...chosen,...skippedNames]),allNames);
+  config=catalog.preserveSkippedConfig(config,skippedNames);
+  fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), config, 'utf8');
 }
 
 let completed = 0;
@@ -259,15 +264,15 @@ async function runInstall(selection, plugin) {
 }
 function filterIncompatible(selection) {
   if (dryRun) return;
-  const runtime = path.resolve(argument('--runtime-root', root));
-  const target = { root: runtime, version: readJson(path.join(runtime, 'node_modules/@deepseek-ai/dsh/package.json'), 'runtime').version };
-  const resolver = require('./plugin-resolver.cjs');
+
   const forced = new Set(argument('--disable-plugins', '').split(',').filter(Boolean));
   const disabled = [];
   for (const plugin of selection) {
     const file = path.join(profile, 'node_modules', plugin.name, 'package.json');
     if (!fs.existsSync(file)) continue;
-    const verdict = resolver.compatibility(readJson(file, plugin.name), target);
+    const folder=path.dirname(file);
+    if(!forced.has(plugin.name))adaptPlugin(folder,target);
+    const verdict = catalog.installedCompatibility(folder, target);
     if (!verdict.ok || forced.has(plugin.name)) { disabled.push(plugin.name); progress(plugin, 'warning', null, '未启用不兼容插件 ' + plugin.name + '：' + (forced.has(plugin.name) ? '上次启动导入失败' : verdict.reason)); }
   }
   if (disabled.length) {
@@ -286,16 +291,38 @@ function filterIncompatible(selection) {
   }
 }
 async function main() {
-  const installed = [];
-  for (const plugin of [...required, ...optional]) {
+  const installed = [], skipped=[];
+  if(!dryRun) {
+    const plan=await catalog.selectPlugins(selected,target,name=>catalog.metadata(name,{home,mirrors,mirror:mirrorRequested}),
+      (plugin,message)=>progress(plugin,'resolve',null,message));
+    selected=plan.selected; skipped.push(...plan.skipped);
+    for(const plugin of plan.skipped)skippedNames.add(plugin.name);
+    for(const plugin of selected)if(plugin.source==='npm')specs[plugin.name]=plugin.version;
+  }
+  for (const plugin of [...selected.filter(p=>p.required), ...selected.filter(p=>!p.required)]) {
     phase = plugin.required ? 'required' : 'optional';
     writeStatus('installing', { phase, plugin: plugin.name, completed, total: selected.length, mirror: mirrorRequested });
     await runInstall([...installed, plugin], plugin);
+    if(!dryRun) {
+      const folder=path.join(profile,'node_modules',plugin.name);
+      adaptPlugin(folder,target);
+      const verdict=catalog.installedCompatibility(folder,target);
+      if(!verdict.ok) {
+        if(plugin.required)throw Error('必需插件 '+plugin.name+' 未通过安装校验：'+verdict.reason);
+        skipped.push({name:plugin.name,reason:verdict.reason}); skippedNames.add(plugin.name);
+        progress(plugin,'warning',null,'跳过不兼容插件 '+plugin.name+'：'+verdict.reason);
+        // Reconcile both manifest and node_modules; never leave an incompatible
+        // package masquerading as an installed, restartable plugin in the market.
+        await runInstall(installed,plugin); completed++;
+        continue;
+      }
+    }
+    if(!dryRun)plugin.version=readJson(path.join(profile,'node_modules',plugin.name,'package.json'),plugin.name).version;
     installed.push(plugin); completed++;
     progress(plugin, 'done', 100, '安装完成：' + plugin.name);
   }
   filterIncompatible(installed);
-  writeStatus(dryRun ? 'dry-run' : 'installed', { selected: installed.map(p => p.name), completed, total: selected.length, mirror: mirrorRequested });
+  writeStatus(dryRun ? 'dry-run' : 'installed', { selected: installed.map(p => p.name), versions:Object.fromEntries(installed.map(p=>[p.name,p.version])), skipped, completed, total: selected.length, mirror: mirrorRequested, runtimeVersion:target.version });
   console.log('recommended plugins installed');
 }
 if(flag('--validate-only')) { try { filterIncompatible(selected); } catch(error) { fail(error.message); } }

@@ -11,15 +11,25 @@
   document.addEventListener('DOMContentLoaded', () => {
     prepare();
     // Do not expose a blank document between navigation and React mounting.
+    const started = Date.now();
+    let stable = 0, finished = false;
     const mounted = setInterval(() => {
-      const frame = document.querySelector('[class*="_frame"]');
-      if (frame && frame.getBoundingClientRect().height > 100) {
-        clearInterval(mounted); requestAnimationFrame(() => requestAnimationFrame(() => {
-          send('ui-ready');
-          // The skin plugin may still be applying its tokens; refresh the cache
-          // once the application has actually mounted.
-          exportTheme(); setTimeout(exportTheme, 800);
+      const root = document.getElementById('root');
+      // Use the actual application root, not a skin's private CSS class.
+      const boot = root && root.querySelector('[data-dsh-boot]');
+      const visible = root && [...root.querySelectorAll('main,nav,aside,[role=main],[role=dialog],button,textarea,input,[class*="_frame"]')].filter(node => {
+        const rect = node.getBoundingClientRect();
+        return rect.height > 12 && rect.width > 12 && getComputedStyle(node).visibility !== 'hidden';
+      }).length >= 2;
+      if (visible && !boot) stable++; else stable = 0;
+      if (stable >= 3 && !finished) {
+        finished = true; clearInterval(mounted);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          send('ui-ready'); exportTheme(); setTimeout(exportTheme, 800);
         }));
+      } else if (Date.now() - started > 40000 && !finished) {
+        finished = true; clearInterval(mounted);
+        send('startup-error:应用根节点未完成挂载；请检查插件加载错误。');
       }
     }, 100);
     window.addEventListener('pagehide', () => clearInterval(mounted), {once:true});

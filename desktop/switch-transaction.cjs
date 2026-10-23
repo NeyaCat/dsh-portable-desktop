@@ -224,3 +224,5 @@ async function openEnvironment(root,key) {
 async function cancel(root) {const state=S.readState(root);if(state.pending) await journal(root,state.pending,'cancelled');state.pending=null;state.revision++;await S.write(S.statePath(root),state);return {cancelled:true};}
 async function setPolicy(root,name,pinned) {P.packageName(name);const current=policies(root);current[name]={pinned:!!pinned};await S.write(path.join(root,'environments/plugin-policies.json'),current);return {policies:current};}
 module.exports={list,analyze,prepare,activate,healthy,recover,openEnvironment,cancel,setPolicy,summary,assertNoWriters};
+
+module.exports=require('./version-transition.cjs')(module.exports);

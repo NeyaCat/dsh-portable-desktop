@@ -221,7 +221,7 @@ internal sealed class VersionWindow : Form
             else if(pieces[0]=="cleanup-preview") Post(new {type="cleanup-preview",data=result});
             else Post(new {type="plan-done"});
             await LoadEnvironments();await SyncSelection();
-            busy=false;Status(pieces[0]=="prepare" ? "更新已准备。重启 DSH 时将保存当前数据并整体切换。" : "操作完成；所有环境数据仍保留。");
+            busy=false;Status(pieces[0]=="prepare" || result.ContainsKey("plan") ? "版本已准备，重启 DSH 时切换程序和插件；当前配置与会话保留。" : "操作完成；当前配置与会话保留。");
         } catch(Exception error) {busy=false;Status("未完成："+error.Message);}
     }
     private async Task Verify()

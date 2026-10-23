@@ -23,6 +23,11 @@ internal sealed class RecommendedPlugin
 // selection. Required plugins (market, proxy, network) are always included.
 internal static class DefaultPlugins
 {
+    private static IntPtr installJob;
+    private static bool cancelled;
+    private static readonly object jobLock = new object();
+    internal static void Cancel() { lock(jobLock) { cancelled=true; if(installJob != IntPtr.Zero) Native.TerminateJobObject(installJob, 1); } }
+
     internal static bool Available(string root)
     {
         return File.Exists(Path.Combine(root, "defaults", "profile", "package.json")) &&
@@ -68,7 +73,7 @@ internal static class DefaultPlugins
         return result;
     }
 
-    internal static bool Install(string root, string home, ProxyBridge bridge, Action<string> log, IList<string> selected)
+    internal static bool Install(string root, string home, ProxyBridge bridge, Action<string> log, IList<string> selected, Action<Dictionary<string, object>> progress = null, string runtimeRoot = null)
     {
         try
         {
@@ -86,11 +91,11 @@ internal static class DefaultPlugins
 
             var names = new List<string>();
             if (selected != null) foreach (string name in selected) if (!String.IsNullOrEmpty(name)) names.Add(name);
-            bool ok = RunInstaller(root, home, node, script, bridge, log, names, mirror);
+            bool ok = RunInstaller(root, home, node, script, bridge, log, names, mirror, progress, runtimeRoot);
             if (!ok && !mirror)
             {
                 log("Recommended plugins: direct install failed, retrying through mirrors");
-                ok = RunInstaller(root, home, node, script, bridge, log, names, true);
+                ok = RunInstaller(root, home, node, script, bridge, log, names, true, progress, runtimeRoot);
             }
             return ok;
         }
@@ -102,8 +107,9 @@ internal static class DefaultPlugins
     }
 
     private static bool RunInstaller(string root, string home, string node, string script,
-        ProxyBridge bridge, Action<string> log, List<string> names, bool mirror)
+        ProxyBridge bridge, Action<string> log, List<string> names, bool mirror, Action<Dictionary<string, object>> progress = null, string runtimeRoot = null, bool validateOnly = false, string disable = null)
     {
+        lock(jobLock) if(cancelled) return false;
         var info = new ProcessStartInfo(node);
         // A trailing backslash before a closing quote escapes that quote in the
         // Windows command line, so trim it from the root directory.
@@ -112,6 +118,9 @@ internal static class DefaultPlugins
         string arguments = "\"" + script + "\" --root \"" + rootArg + "\" --home \"" + homeArg + "\" --plugins \"" +
             String.Join(",", names.ToArray()) + "\"";
         if (mirror) arguments += " --mirror";
+        if (validateOnly) arguments += " --validate-only";
+        if (!String.IsNullOrEmpty(disable)) arguments += " --disable-plugins \"" + disable + "\"";
+        if (!String.IsNullOrEmpty(runtimeRoot)) arguments += " --runtime-root \"" + runtimeRoot.TrimEnd('\\') + "\"";
         info.Arguments = arguments;
         info.WorkingDirectory = root;
         info.UseShellExecute = false;
@@ -147,13 +156,31 @@ internal static class DefaultPlugins
         {
             process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
             {
-                if (e.Data != null) log("plugins: " + e.Data);
+                if (e.Data != null) {
+                    if (e.Data.StartsWith("@@DSH_PLUGIN ")) {
+                        try {
+                            var row = new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(e.Data.Substring(13));
+                            log("plugins: " + Text(row, "message"));
+                            if(progress != null) progress(row);
+                        } catch (ArgumentException) { log("Plugin progress format error"); }
+                    } else log("plugins: " + e.Data);
+                }
             };
             process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
             {
                 if (e.Data != null) log("plugins: " + e.Data);
             };
-            process.Start();
+            IntPtr ownedJob = Native.CreateJobObject(IntPtr.Zero, null);
+            if(ownedJob == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+            var limits = new Native.ExtendedLimits(); limits.BasicLimitInformation.LimitFlags = 0x2000;
+            if(!Native.SetInformationJobObject(ownedJob, 9, ref limits, System.Runtime.InteropServices.Marshal.SizeOf(limits))) { Native.CloseHandle(ownedJob); throw new System.ComponentModel.Win32Exception(); }
+            try {
+            lock(jobLock) {
+                if(cancelled) return false;
+                process.Start();
+                if(!Native.AssignProcessToJobObject(ownedJob, process.Handle)) { process.Kill(); throw new System.ComponentModel.Win32Exception(); }
+                installJob=ownedJob;
+            }
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             if (!process.WaitForExit(60 * 60 * 1000))
@@ -165,7 +192,21 @@ internal static class DefaultPlugins
             process.WaitForExit();
             log("Recommended plugins: exit " + process.ExitCode);
             return process.ExitCode == 0;
+            } finally { lock(jobLock) { installJob=IntPtr.Zero; Native.CloseHandle(ownedJob); } }
         }
+    }
+
+    internal static void DisableFailed(string root, string home, string runtime, string names, Action<string> log)
+    {
+        if(!RunInstaller(root,home,Path.Combine(root,"node","node.exe"),Path.Combine(root,"desktop","install-plugins.cjs"),null,log,new List<string>(),false,null,runtime,true,names))
+            throw new Exception("Could not suspend failed optional plugins.");
+    }
+
+    internal static void ValidateInstalled(string root, string home, string runtime, Action<string> log)
+    {
+        if (!File.Exists(Path.Combine(home,"profiles","web","package.json")) || !Available(root)) return;
+        if (!RunInstaller(root,home,Path.Combine(root,"node","node.exe"),Path.Combine(root,"desktop","install-plugins.cjs"),null,log,new List<string>(),false,null,runtime,true))
+            throw new Exception("Installed plugin compatibility check failed; see data/desktop.log.");
     }
 
     private static string Text(Dictionary<string, object> row, string key)

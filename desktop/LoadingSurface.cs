@@ -9,6 +9,54 @@ internal sealed class LoadingSurface : Control
 {
     private readonly Timer animation = new Timer { Interval = 40 };
     private readonly GraphicsPath logo = CreateLogo();
+    private readonly Panel installPanel = new Panel { Dock = DockStyle.Fill, Visible = false };
+    private readonly Label installTitle = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly Label overallTitle = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly ProgressBar singleProgress = new ProgressBar { Dock = DockStyle.Fill };
+    private readonly ProgressBar overallProgress = new ProgressBar { Dock = DockStyle.Fill };
+    private readonly RichTextBox installLog = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.FixedSingle, DetectUrls = false };
+    internal void BeginInstall()
+    {
+        if (installPanel.Controls.Count == 0) {
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(40, 65, 40, 35) };
+            foreach (int height in new int[] { 40, 24, 40, 24, 15 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(installTitle, 0, 0); layout.Controls.Add(singleProgress, 0, 1);
+            layout.Controls.Add(overallTitle, 0, 2); layout.Controls.Add(overallProgress, 0, 3);
+            layout.Controls.Add(installLog, 0, 5); installPanel.Controls.Add(layout); Controls.Add(installPanel);
+            var exit = new Button { Text="×", Size=new Size(44,30), Location=new Point(Width-44,0), Anchor=AnchorStyles.Top|AnchorStyles.Right, FlatStyle=FlatStyle.Flat };
+            exit.FlatAppearance.BorderSize=0; exit.Click += delegate { FindForm().Close(); };
+            installPanel.Controls.Add(exit); exit.BringToFront();
+        }
+        installPanel.BackColor = installLog.BackColor = BackColor;
+        installLog.ForeColor = ForeColor; installLog.Font = new Font("Microsoft YaHei UI", 10);
+        installPanel.ForeColor = ForeColor;
+        installLog.Clear(); installTitle.Text = "正在检查下载源…"; overallTitle.Text = "整体安装进度：准备中";
+        singleProgress.Style = ProgressBarStyle.Marquee; overallProgress.Value = 0;
+        installPanel.Visible = true; installPanel.BringToFront();
+    }
+    internal void ReportInstall(System.Collections.Generic.Dictionary<string, object> row)
+    {
+        string plugin = Updates.Value(row, "title"), stage = Updates.Value(row, "stage");
+        int total = Convert.ToInt32(row["total"]), completed = Convert.ToInt32(row["completed"]);
+        if (total <= 0) total = 1;
+        installTitle.Text = plugin + " · " + Updates.Value(row, "message");
+        overallTitle.Text = "整体安装进度：" + completed + " / " + total;
+        overallProgress.Value = Math.Max(0, Math.Min(100, completed * 100 / total));
+        if (row["percent"] == null) singleProgress.Style = ProgressBarStyle.Marquee;
+        else {
+            singleProgress.Style = ProgressBarStyle.Continuous;
+            singleProgress.Value = Math.Max(0, Math.Min(100, Convert.ToInt32(row["percent"])));
+        }
+        if (installLog.Lines.Length > 150) {
+            var lines = installLog.Lines;
+            installLog.Lines = new System.Collections.Generic.List<string>(lines).GetRange(lines.Length - 100, 100).ToArray();
+        }
+        installLog.AppendText(DateTime.Now.ToString("HH:mm:ss") + " " + Updates.Value(row, "message") + Environment.NewLine);
+        installLog.SelectionStart = installLog.TextLength; installLog.ScrollToCaret();
+    }
+    internal void EndInstall() { installPanel.Visible = false; }
+
     private int frame;
     private Color accent = Color.FromArgb(86,134,254);
     internal bool Failed;

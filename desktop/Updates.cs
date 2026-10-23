@@ -69,6 +69,19 @@ internal static class Updates
             info.RedirectStandardError = true;
             info.StandardOutputEncoding = Encoding.UTF8;
             info.StandardErrorEncoding = Encoding.UTF8;
+            string home=Path.Combine(Root,"data");
+            try {
+                var state=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(ReadFile("environments/state.json"));
+                if(state != null && state.ContainsKey("active")) {
+                    var env=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(ReadFile("environments/"+state["active"]+"/manifest.json"));
+                    if(env != null && env.ContainsKey("home")) home=Path.GetFullPath(Path.Combine(Root,env["home"].ToString()));
+                }
+            } catch(Exception) {}
+            using(var bridge=new ProxyBridge(home,null)) { bridge.Initialize(); bridge.ApplyEnvironment(info); }
+            string proxy=info.EnvironmentVariables["HTTPS_PROXY"];
+            if(String.IsNullOrEmpty(proxy)) proxy=info.EnvironmentVariables["HTTP_PROXY"];
+            if(!String.IsNullOrEmpty(proxy)) { info.EnvironmentVariables["npm_config_proxy"]=proxy;info.EnvironmentVariables["npm_config_https_proxy"]=proxy; }
+            info.EnvironmentVariables["npm_config_userconfig"]=Path.Combine(home,"profiles","web",".npmrc");
             using (var process = new Process { StartInfo = info })
             {
                 process.Start();

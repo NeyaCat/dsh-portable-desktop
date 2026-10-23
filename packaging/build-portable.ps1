@@ -267,7 +267,7 @@ try {
     Write-Step 'Writing launcher and documentation'
     foreach ($script in @('update-worker.cjs', 'environment-store.cjs',
         'switch-transaction.cjs', 'plugin-resolver.cjs', 'environment-cleanup.cjs',
-        'install-plugins.cjs', 'repair-http-proxy.cjs')) {
+        'install-plugins.cjs', 'repair-http-proxy.cjs', 'cache-cleanup.cjs', 'version-transition.cjs')) {
         Copy-Item -LiteralPath (Join-Path $repo "desktop\$script") -Destination (Join-Path $payload 'desktop') -Force
     }
     # Exercise the real worker from the staged package, without network or user data.

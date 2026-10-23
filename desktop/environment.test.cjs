@@ -5,7 +5,9 @@ const fs=require('node:fs/promises');
 const path=require('node:path');
 const S=require('./environment-store.cjs');
 const P=require('./plugin-resolver.cjs');
-const T=require('./switch-transaction.cjs');
+// Legacy full-data recovery remains supported for already-prepared v1 transactions.
+// Current version-manifest behavior is covered by version-transition.test.cjs.
+const T=require('./switch-transaction.cjs').legacy;
 async function testTemp(prefix) {
   const base=path.join(process.cwd(),'.test-tmp');
   await fs.mkdir(base,{recursive:true});

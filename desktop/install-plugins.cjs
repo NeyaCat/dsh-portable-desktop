@@ -5,7 +5,8 @@
 // leaves the user without the plugin market or the proxy controls.
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
+const readline = require('node:readline');
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -141,7 +142,7 @@ const requiredNames = new Set(required.map(plugin => plugin.name));
 if (required.length !== 3) fail('plugin manifest must mark exactly three required plugins');
 
 const requestedText = argument('--plugins', null);
-const requested = requestedText === null
+const requested = requestedText === null || flag('--validate-only')
   ? new Set(allNames)
   : new Set(requestedText.split(',').map(value => value.trim()).filter(Boolean));
 for (const name of requiredNames) requested.add(name);
@@ -170,7 +171,13 @@ const environment = Object.assign({}, process.env, {
 environment.PATH = path.dirname(node) + path.delimiter + path.join(root, 'git', 'cmd') + path.delimiter + (environment.PATH || '');
 
 const specs = {};
-for (const plugin of selected) specs[plugin.name] = plugin.spec;
+for (const plugin of selected) {
+  specs[plugin.name] = plugin.source === 'git' || plugin.spec.startsWith('file:') ? plugin.spec : plugin.version;
+  if (plugin.source === 'git') {
+    const pinned = githubTarball(baseLock, plugin.name);
+    if (pinned) specs[plugin.name] = pinned;
+  }
+}
 if (mirrorRequested) {
   const githubBase = mirrors.github.endsWith('/') ? mirrors.github : mirrors.github + '/';
   environment.npm_config_registry = mirrors.npm;
@@ -182,7 +189,8 @@ if (mirrorRequested) {
     else console.warn('no pinned GitHub tarball for ' + plugin.name + '; using git with the mirror');
   }
 }
-const lockText = mirrorRequested ? rewriteLock(baseLock, mirrors) : baseLock;
+const directLock = baseLock.replace(/https:\/\/registry\.npmmirror\.com\//g, 'https://registry.npmjs.org/');
+const lockText = mirrorRequested ? rewriteLock(baseLock, mirrors) : directLock;
 const configText = filterConfig(baseConfig, selectedNames, allNames);
 
 function writeProfile(selection) {
@@ -202,36 +210,93 @@ function writeProfile(selection) {
   fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), configText, 'utf8');
 }
 
-function runInstall(selection, label) {
+let completed = 0;
+function progress(plugin, stage, percent, message) {
+  console.log('@@DSH_PLUGIN ' + JSON.stringify({
+    plugin: plugin.name, title: plugin.title || plugin.name, index: completed + 1,
+    total: selected.length, completed, stage, percent, message
+  }));
+}
+async function runInstall(selection, plugin) {
   writeProfile(selection);
-  console.log('installing ' + label + ': ' + selection.map(plugin => plugin.name).join(', '));
-  if (dryRun) {
-    console.log('dry run: skipped pnpm install');
-    return;
+  progress(plugin, 'resolve', null, '正在解析依赖：' + plugin.name);
+  if (dryRun) { progress(plugin, 'dry-run', null, '预演：未执行下载或安装'); return; }
+  const args = [pnpm, 'install', '--prod', '--no-frozen-lockfile',
+    '--config.confirmModulesPurge=false', '--reporter=ndjson'];
+  await new Promise((resolve, reject) => {
+    const child = spawn(node, args, { cwd: profile, stdio: ['ignore', 'pipe', 'pipe'], env: environment, windowsHide: true });
+    let last = 0, lastStage = ''; const downloads = new Map();
+    const receive = line => {
+      let event; try { event = JSON.parse(line); } catch {
+        if (line.trim()) progress(plugin, 'log', null, line.replace(/https?:\/\/\S+/g, '[下载源]'));
+        return;
+      }
+      const name = event.name || '', status = event.status || '';
+      let stage = '', percent = null, message = '';
+      if (/fetching-progress/.test(name)) {
+        stage = 'download';
+        downloads.set(event.packageId || event.id || plugin.name, {size:Number(event.size||event.total)||0,bytes:Number(event.downloaded)||0});
+        const size = [...downloads.values()].reduce((n,d)=>n+d.size,0), bytes = [...downloads.values()].reduce((n,d)=>n+d.bytes,0);
+        if (size > 0 && bytes >= 0) percent = Math.min(90, Math.floor(bytes / size * 90));
+        message = '正在下载 ' + plugin.name + (size > 0 ? '：' + Math.floor(bytes / 1024) + '/' + Math.floor(size / 1024) + ' KB' : ' 的依赖');
+      } else if (/progress/.test(name)) {
+        stage = status === 'imported' ? 'install' : status === 'found_in_store' ? 'cache' : 'resolve';
+        message = (stage === 'install' ? '正在安装依赖' : stage === 'cache' ? '正在复用缓存' : '正在解析依赖') + '：' + plugin.name;
+      } else if (event.level === 'warn' || event.level === 'error') {
+        stage = 'warning'; message = String(event.message || event.err?.message || '包管理器警告').replace(/https?:\/\/\S+/g, '[下载源]');
+      }
+      if (!stage) return;
+      if (stage !== lastStage || Date.now() - last > 200 || stage === 'warning') {
+        progress(plugin, stage, percent, message); last = Date.now(); lastStage = stage;
+      }
+    };
+    readline.createInterface({ input: child.stdout }).on('line', receive);
+    readline.createInterface({ input: child.stderr }).on('line', receive);
+    child.once('error', reject);
+    child.once('close', code => code === 0 ? resolve() : reject(Error('pnpm 退出码 ' + code + '，插件 ' + plugin.name)));
+  });
+  progress(plugin, 'verify', 95, '正在校验插件：' + plugin.name);
+}
+function filterIncompatible(selection) {
+  if (dryRun) return;
+  const runtime = path.resolve(argument('--runtime-root', root));
+  const target = { root: runtime, version: readJson(path.join(runtime, 'node_modules/@deepseek-ai/dsh/package.json'), 'runtime').version };
+  const resolver = require('./plugin-resolver.cjs');
+  const forced = new Set(argument('--disable-plugins', '').split(',').filter(Boolean));
+  const disabled = [];
+  for (const plugin of selection) {
+    const file = path.join(profile, 'node_modules', plugin.name, 'package.json');
+    if (!fs.existsSync(file)) continue;
+    const verdict = resolver.compatibility(readJson(file, plugin.name), target);
+    if (!verdict.ok || forced.has(plugin.name)) { disabled.push(plugin.name); progress(plugin, 'warning', null, '未启用不兼容插件 ' + plugin.name + '：' + (forced.has(plugin.name) ? '上次启动导入失败' : verdict.reason)); }
   }
-  const args = [pnpm, 'install', '--prod', '--no-frozen-lockfile', '--config.confirmModulesPurge=false'];
-  const result = spawnSync(node, args, { cwd: profile, stdio: 'inherit', env: environment });
-  if (result.error) fail(result.error.message, { label });
-  if (result.status !== 0) fail('pnpm install exited with ' + result.status + ' (' + label + ')', { label });
+  if (disabled.length) {
+    const file = path.join(profile, 'package.json'), pkg = readJson(file, 'profile');
+    pkg.dsh.profile.bundles = pkg.dsh.profile.bundles.filter(n => !disabled.includes(n));
+    fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
+    const patchFile = path.join(profile, 'cordis.patch.yml');
+    if(fs.existsSync(patchFile)) {
+      const yaml = require(path.join(root,'node_modules/yaml'));
+      const doc = yaml.parseDocument(fs.readFileSync(patchFile,'utf8'));
+      if(doc.errors.length) throw Error('Plugin config is invalid; original config retained');
+      if(yaml.isSeq(doc.contents)) for(const row of doc.contents.items)
+        if(yaml.isMap(row) && disabled.includes(row.get('name'))) row.set('disabled',true);
+      fs.writeFileSync(patchFile,doc.toString());
+    }
+  }
 }
-
-console.log('selected ' + selected.length + ' plugins (' + required.length + ' required, ' + optional.length + ' optional)');
-if (mirrorRequested) console.log('using npm mirror ' + mirrors.npm + ' and GitHub mirror ' + mirrors.github);
-else console.log('using direct npm/GitHub connections');
-
-phase = 'required';
-writeStatus('installing', { required: required.map(plugin => plugin.name), optional: optional.map(plugin => plugin.name), mirror: mirrorRequested });
-runInstall(required, 'required plugins');
-writeStatus('required-installed', { required: required.map(plugin => plugin.name), optional: optional.map(plugin => plugin.name), mirror: mirrorRequested });
-
-if (optional.length > 0) {
-  phase = 'optional';
-  runInstall(selected, 'optional plugins');
+async function main() {
+  const installed = [];
+  for (const plugin of [...required, ...optional]) {
+    phase = plugin.required ? 'required' : 'optional';
+    writeStatus('installing', { phase, plugin: plugin.name, completed, total: selected.length, mirror: mirrorRequested });
+    await runInstall([...installed, plugin], plugin);
+    installed.push(plugin); completed++;
+    progress(plugin, 'done', 100, '安装完成：' + plugin.name);
+  }
+  filterIncompatible(installed);
+  writeStatus(dryRun ? 'dry-run' : 'installed', { selected: installed.map(p => p.name), completed, total: selected.length, mirror: mirrorRequested });
+  console.log('recommended plugins installed');
 }
-if (dryRun) {
-  writeStatus('dry-run', { selected: selected.map(plugin => plugin.name), required: required.map(plugin => plugin.name), optional: optional.map(plugin => plugin.name), mirror: mirrorRequested });
-  process.exit(0);
-}
-writeStatus('installed', { selected: selected.map(plugin => plugin.name), required: required.map(plugin => plugin.name), optional: optional.map(plugin => plugin.name), mirror: mirrorRequested });
-console.log('recommended plugins installed');
-process.exit(0);
+if(flag('--validate-only')) { try { filterIncompatible(selected); } catch(error) { fail(error.message); } }
+else main().catch(error => fail(error.message));

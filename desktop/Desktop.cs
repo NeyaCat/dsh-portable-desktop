@@ -87,6 +87,8 @@ internal static class Program
             {
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                // Register before environment repair or plugin installation so an old cleanup worker yields.
+                Updates.WriteRuntime("");
                 if (!EnvironmentCheck.EnsureReady()) return;
                 using (var window = new DesktopWindow())
                 {
@@ -614,6 +616,36 @@ internal sealed class DesktopWindow : Form
         return verdict;
     }
 
+    private readonly HashSet<string> failedStartupPlugins = new HashSet<string>();
+
+
+    private bool repairingStartup;
+    private int startupRepairCount;
+    private readonly HashSet<string> suspendedStartupPlugins = new HashSet<string>();
+    private async Task<bool> RepairStartupPlugins(IEnumerable<string> requested)
+    {
+        if(closing || uiReady || repairingStartup || startupRepairCount >= 3) return false;
+        var known=DefaultPlugins.Catalog(Program.Root);
+        var names=new List<string>();
+        foreach(string name in requested)
+            if(!suspendedStartupPlugins.Contains(name) && known.Exists(p=>p.Name==name)) names.Add(name);
+        if(names.Count==0) return false;
+        repairingStartup=true;startupRepairCount++;
+        try {
+            StopBackend();
+            ShowLoading("正在暂停与当前版本不兼容的插件，保留配置并重新启动…");
+            await Task.Run(() => DefaultPlugins.DisableFailed(Program.Root,environmentHome,runtimeRoot,String.Join(",",names.ToArray()),Log));
+            foreach(string name in names) suspendedStartupPlugins.Add(name);
+            var remaining=new List<object>();
+            foreach(object name in (System.Collections.IEnumerable)expectedPlugins)
+                if(!suspendedStartupPlugins.Contains(Convert.ToString(name))) remaining.Add(name);
+            expectedPlugins=remaining.ToArray();
+            environmentWarning="与当前 DSH 不兼容的推荐插件已暂停，原配置保留："+String.Join("、",new List<string>(suspendedStartupPlugins).ToArray())+"。";
+            if(closing)return false;
+            await LaunchBackendAsync();return true;
+        } finally {repairingStartup=false;}
+    }
+
     private async Task LaunchBackendAsync()
     {
         uiReady = false; backendWasReady = false;
@@ -625,11 +657,14 @@ internal sealed class DesktopWindow : Form
         if (closing) return;
         if (completed != pending.Task) throw new TimeoutException("后台启动超时，请查看 data/desktop.log。");
         string url = await pending.Task;
+        string[] failures; lock(logLock) { failures=new List<string>(failedStartupPlugins).ToArray(); failedStartupPlugins.Clear(); }
+        if(await RepairStartupPlugins(failures)) return;
         backendWasReady = true; backendRestartRequested = false;
         ShowLoading("正在加载 DSH 界面…");
         origin = new Uri(url);
         web.CoreWebView2.Navigate(url);
         if(environmentTrial) WatchEnvironment();
+        WatchPageLoad(url);
     }
 
     private async void WatchEnvironment()
@@ -747,7 +782,7 @@ internal sealed class DesktopWindow : Form
             }
             await StartAsync();
         };
-        FormClosed += delegate { closing = true; RemoveTrayIcon(); selectionTimer.Dispose(); StopBackend(); if (proxyBridge != null) { proxyBridge.Dispose(); proxyBridge = null; } foreach (var popup in popupRelays.ToArray()) popup.Dispose(); popupRelays.Clear(); web.Dispose(); };
+        FormClosed += delegate { closing = true; DefaultPlugins.Cancel(); RemoveTrayIcon(); selectionTimer.Dispose(); StopBackend(); if (proxyBridge != null) { proxyBridge.Dispose(); proxyBridge = null; } foreach (var popup in popupRelays.ToArray()) popup.Dispose(); popupRelays.Clear(); web.Dispose(); StartCacheCleanup(); };
         selectionTimer.Tick += async delegate {
             if (!updateChecked || installingUpdate || closing) return;
             string stamp = Updates.ReadFile("environments/state.json");
@@ -1011,7 +1046,13 @@ internal sealed class DesktopWindow : Form
             DesktopPreferences.SaveRecommendedPlugins("failed");
             Log("Recommended plugins: selected " + selected.Count + " plugin(s)");
             ShowLoading("正在安装所选插件（必需组件优先，首次约下载 200 MB）…");
-            bool ok = await Task.Run(delegate { return DefaultPlugins.Install(Program.Root, home, proxyBridge, Log, selected); });
+            status.BeginInstall();
+            bool ok = await Task.Run(delegate { return DefaultPlugins.Install(Program.Root, home, proxyBridge, Log, selected, row => {
+                if(closing) return;
+                try { BeginInvoke((Action)(() => { if(!closing) status.ReportInstall(row); })); } catch(InvalidOperationException) {}
+            }, runtimeRoot); });
+            status.EndInstall();
+            if(closing) return;
             if (proxyBridge != null) Log("ProxyBridge: npmrc " + proxyBridge.SyncNow());
             if (ok)
             {
@@ -1028,6 +1069,7 @@ internal sealed class DesktopWindow : Form
         }
         catch (Exception error)
         {
+            status.EndInstall();
             Log("Recommended plugins failed: " + error.Message);
         }
     }
@@ -1060,6 +1102,8 @@ internal sealed class DesktopWindow : Form
             proxyBridge = new ProxyBridge(environmentHome, Log);
             proxyBridge.Initialize();
             await EnsureRecommendedPluginsAsync(environmentHome);
+            if(closing) return;
+            await Task.Run(() => DefaultPlugins.ValidateInstalled(Program.Root, environmentHome, runtimeRoot, Log));
             environmentTrial=runtime.ContainsKey("trial") && (bool)runtime["trial"];
             if(runtime.ContainsKey("expectedPlugins")) expectedPlugins=runtime["expectedPlugins"];
             if(runtime.ContainsKey("plugins")) environmentPlugins=runtime["plugins"];
@@ -1078,8 +1122,18 @@ internal sealed class DesktopWindow : Form
             web.CoreWebView2.Settings.IsStatusBarEnabled = false;
             web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             web.CoreWebView2.WebMessageReceived += ReceiveChromeCommand;
-            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--verify-plugins") >= 0)
-                await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("addEventListener('error',e=>chrome.webview.postMessage('desktop:plugin-error:'+e.message));addEventListener('unhandledrejection',e=>chrome.webview.postMessage('desktop:plugin-error:'+String(e.reason)));const originalError=console.error;console.error=(...args)=>{chrome.webview.postMessage('desktop:plugin-error:'+args.map(String).join(' ').slice(0,1800));originalError(...args)};");
+            await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("addEventListener('error',e=>chrome.webview.postMessage('desktop:plugin-error:'+e.message));addEventListener('unhandledrejection',e=>chrome.webview.postMessage('desktop:plugin-error:'+String(e.reason)));const originalError=console.error;console.error=(...args)=>{chrome.webview.postMessage('desktop:plugin-error:'+args.map(String).join(' ').slice(0,1800));originalError(...args)};");
+            web.CoreWebView2.WebMessageReceived += async delegate(object sender, CoreWebView2WebMessageReceivedEventArgs e) {
+                Uri page; if(origin == null || !Uri.TryCreate(e.Source,UriKind.Absolute,out page) || !IsLocal(page)) return;
+                string message; try { message=e.TryGetWebMessageAsString(); } catch(ArgumentException) {return;}
+                if(message.StartsWith("desktop:startup-error:") || message.StartsWith("desktop:plugin-error:"))
+                    Log(Regex.Replace(message, @"https?://\S+", "[URL redacted]"));
+                if(!uiReady && message.StartsWith("desktop:plugin-error:")) {
+                    var failed=new List<string>();
+                    foreach(Match match in Regex.Matches(message, @"(?:^|\s)(@?[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)?): (?:pending|failed|broken)")) failed.Add(match.Groups[1].Value);
+                    try { await RepairStartupPlugins(failed); } catch(Exception error) { Fail("插件兼容性修复失败："+error.Message); }
+                }
+            };
             web.CoreWebView2.WindowCloseRequested += delegate { Close(); };
             // Observe the actual accepted response, preserving the market's origin,
             // permission and in-progress-install checks. The launcher owns the new
@@ -1321,7 +1375,7 @@ internal sealed class DesktopWindow : Form
         if (!Native.SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(limits)))
             throw new System.ComponentModel.Win32Exception();
         var info = new ProcessStartInfo(Path.Combine(Program.Root, "node", "node.exe"));
-        info.Arguments = "\"" + Path.Combine(runtimeRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js") +
+        info.Arguments = "--use-env-proxy \"" + Path.Combine(runtimeRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js") +
             "\" web --host 127.0.0.1 --port 0 --no-open";
         info.WorkingDirectory = Program.Root;
         info.UseShellExecute = false;
@@ -1363,6 +1417,8 @@ internal sealed class DesktopWindow : Form
     private void ReceiveLine(object sender, DataReceivedEventArgs e)
     {
         if (e.Data == null || !Object.ReferenceEquals(sender, backend)) return;
+        foreach(Match failed in Regex.Matches(e.Data, @"(?:^|\s)(@?[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)?) \([^)]*\): failed to import"))
+            lock(logLock) failedStartupPlugins.Add(failed.Groups[1].Value);
         var match = Regex.Match(e.Data, @"dsh web: (http://127\.0\.0\.1:\d+/\S*)");
         if (match.Success) address.TrySetResult(match.Groups[1].Value);
         // Startup URLs carry credentials and must not be saved in the log.
@@ -1392,6 +1448,29 @@ internal sealed class DesktopWindow : Form
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    private async void WatchPageLoad(string requestedUrl)
+    {
+        await Task.Delay(45000);
+        if(closing || uiReady || origin == null || origin.AbsoluteUri != requestedUrl || environmentFailed) return;
+        try {
+            string state = await web.CoreWebView2.ExecuteScriptAsync("JSON.stringify({ready:document.readyState,root:!!document.getElementById('root'),boot:!!document.querySelector('[data-dsh-boot]'),error:!!document.querySelector('[data-dsh-boot-error]')})");
+            Log("Page mount timeout: " + state);
+            Fail("DSH 页面未完成加载。可能有插件启动失败，请检查 data/desktop.log 中的 startup-error 或 plugin-error。关闭后可在版本管理检查插件。");
+        } catch(Exception error) { Fail("界面加载失败：" + error.Message); }
+    }
+
+    private void StartCacheCleanup()
+    {
+        try {
+            var script=Path.Combine(Program.Root,"desktop","cache-cleanup.cjs");
+            if(!File.Exists(script)) return;
+            Process.Start(new ProcessStartInfo(Path.Combine(Program.Root,"node","node.exe"),
+                "\"" + script + "\" --wait-for-pid " + Process.GetCurrentProcess().Id) {
+                WorkingDirectory=Program.Root,UseShellExecute=false,CreateNoWindow=true
+            });
+        } catch(Exception error) { Log("Cache cleanup deferred: " + error.Message); }
     }
 
     private void StopBackend()

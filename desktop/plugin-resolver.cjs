@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const S = require('./environment-store.cjs');
+const proxy=process.env.HTTPS_PROXY||process.env.HTTP_PROXY||process.env.npm_config_https_proxy;
+if(proxy){const {ProxyAgent,setGlobalDispatcher}=require(path.join(S.ROOT,'node/node_modules/npm/node_modules/undici'));setGlobalDispatcher(new ProxyAgent(proxy));}
 const semver = require(path.join(S.ROOT, 'node/node_modules/npm/node_modules/semver'));
 const yaml = require(path.join(S.ROOT, 'node_modules/yaml'));
 function packageName(name) {
@@ -76,7 +78,9 @@ function compatibility(pkg, target) {
 async function metadata(root, name) {
   const file=path.join(root,'artifacts/metadata',S.digest(name)+'.json');
   try {
-    const response=await fetch('https://registry.npmjs.org/'+encodeURIComponent(name),{signal:AbortSignal.timeout(20000)});
+    let response;
+    try { response=await fetch('https://registry.npmjs.org/'+encodeURIComponent(name),{signal:AbortSignal.timeout(20000)}); if(!response.ok)throw Error('HTTP '+response.status); }
+    catch { response=await fetch('https://registry.npmmirror.com/'+encodeURIComponent(name),{signal:AbortSignal.timeout(20000)}); }
     if(!response.ok) throw Error('HTTP '+response.status);
     const data=await response.json(); await S.write(file,{fetchedAt:new Date().toISOString(),data}); return data;
   } catch(error) {
@@ -86,7 +90,7 @@ async function metadata(root, name) {
 }
 function runNode(root,args,cwd) {
   return new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,args,{cwd,windowsHide:true,env:{...process.env,PATH:path.join(root,'node')+path.delimiter+process.env.PATH},stdio:['ignore','pipe','pipe']});
+    const child=spawn(process.execPath,args,{cwd,windowsHide:true,env:{...process.env,npm_config_userconfig:process.env.npm_config_userconfig||path.join(root,'data/profiles/web/.npmrc'),PATH:path.join(root,'node')+path.delimiter+process.env.PATH},stdio:['ignore','pipe','pipe']});
     let output=''; const receive=b=>{output=(output+b).slice(-6000);};child.stdout.on('data',receive);child.stderr.on('data',receive);
     const timer=setTimeout(()=>{const kill=spawn('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});kill.on('error',()=>child.kill());},600000);
     child.on('error',error=>{clearTimeout(timer);reject(error);}); child.on('close',code=>{clearTimeout(timer);code===0?resolve():reject(Error('插件依赖安装失败（退出码 '+code+'），原环境未改动'));});
@@ -119,7 +123,8 @@ async function artifact(root,name,version,progress) {
   progress('正在准备插件 '+name+' '+version+'…');
   const pnpm=path.join(root,'desktop/plugin-tools/node_modules/pnpm/bin/pnpm.cjs');
   if(!S.exists(pnpm)) throw Error('缺少内置插件安装工具 pnpm');
-  await runNode(root,[pnpm,'install','--store-dir','.pnpm-store','--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmjs.org'],folder);
+  try { await runNode(root,[pnpm,'install','--store-dir','.pnpm-store','--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmjs.org'],folder); }
+  catch(error) { progress('直连下载失败，正在使用镜像重试 '+name+'…'); await runNode(root,[pnpm,'install','--store-dir','.pnpm-store','--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmmirror.com'],folder); }
   const pkg=S.json(path.join(folder,'node_modules',name,'package.json'));
   if(pkg.version!==version) throw Error('插件版本校验失败');
   // Build scripts are deliberately not executed in the background with user credentials.
@@ -136,19 +141,29 @@ async function planPlugins(root, current, target, options={}, progress=()=>{}) {
     if(!plugin.hasPluginSurface) {changes.push({...plugin,action:'keep',reason:'普通依赖随环境保留'});continue;}
     if(!plugin.enabled) {changes.push({...plugin,action:'disabled',reason:'保留用户禁用状态'});continue;}
     const verdict=compatibility(plugin,target);
-    if(verdict.ok) {changes.push({...plugin,action:'keep',suspended:false,reason:verdict.reason});continue;}
-    let replacement=null, failure=verdict.reason;
+    if(verdict.ok && !options.checkUpdates) {changes.push({...plugin,action:'keep',suspended:false,reason:verdict.reason});continue;}
+    let replacement=null, failure=verdict.reason, checkedUpdates=false;
     const policy=options.policies?.[plugin.name];
     if(plugin.source==='npm' && !policy?.pinned) {
       try {
-        const meta=await metadata(root,plugin.name);
+        const meta=await metadata(root,plugin.name); checkedUpdates=true;
         const candidates=Object.entries(meta.versions||{}).filter(([v,m])=>semver.valid(v)&&!m.deprecated&&m.dist?.integrity&&m.dist?.tarball&&compatibility(m,target).ok)
           .sort(([a],[b])=>semver.rcompare(a,b));
         for(const [version,pkg] of candidates) {
           if(Object.keys(pkg.dependencies||{}).some(n=>n.startsWith('@deepseek-ai/'))) continue;
+          const recorded=options.versions?.find(p=>p.name===plugin.name)?.version;
+          if(recorded && version!==recorded)continue;
+          if(verdict.ok && !recorded && !semver.gt(version,plugin.version))continue;
           replacement={version,peers:pkg.peerDependencies||{}}; break;
         }
       } catch(error) {failure=error.message;}
+    }
+    const recordedVersion=options.versions?.find(p=>p.name===plugin.name)?.version;
+    if(recordedVersion && recordedVersion!==plugin.version && !replacement) {
+      changes.push({...plugin,action:'suspend',suspended:true,reason:'恢复点指定插件版本不可用或不兼容；配置保留，未改装其他版本'});continue;
+    }
+    if(verdict.ok && (!replacement || replacement.version===plugin.version)) {
+      changes.push({...plugin,action:'keep',suspended:false,reason:checkedUpdates?'已检查更新；复用兼容的相同插件版本':'版本兼容；未取得更新资料或已固定版本，保留当前插件'});continue;
     }
     if(replacement) {
       changes.push({...plugin,action:'replace',targetVersion:replacement.version,targetPeers:replacement.peers,reason:verdict.reason+'；找到声明兼容版本',suspended:false});
@@ -193,7 +208,7 @@ async function applyPlugins(root,home,changes) {
     // field, preserving the snapshot's configuration and unknown YAML tags.
     if(yaml.isSeq(patch.contents)) for(const row of patch.contents.items) {
       if(!yaml.isMap(row) || !item.ids.includes(row.get('id'))) continue;
-      if(!item.enabled) row.set('disabled',true);
+      if(!item.enabled || item.action==='suspend') row.set('disabled',true);
       else row.delete('disabled');
     }
     if(item.action!=='replace') continue;

@@ -34,10 +34,13 @@ function catalogue(metadata) {
 }
 
 async function fetchCatalogue() {
-  const response = await fetch(`${REGISTRY}/@deepseek-ai%2fdsh`, {
+  let response;
+  try { response = await fetch(`${REGISTRY}/@deepseek-ai%2fdsh`, {
     signal: AbortSignal.timeout(25000), headers: { Accept: 'application/json' }
   });
-  if (!response.ok) throw new Error(`官方版本源返回 HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`官方版本源返回 HTTP ${response.status}`);
+  } catch { response=await fetch('https://registry.npmmirror.com/@deepseek-ai%2fdsh',{signal:AbortSignal.timeout(25000),headers:{Accept:'application/json'}}); }
+  if(!response.ok)throw new Error('版本源与镜像均不可用');
   return catalogue(await response.json());
 }
 

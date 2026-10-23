@@ -3,63 +3,20 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-// Official geometry from @deepseek-ai/dsh-client-ui-primitives FishLogo.
-// Native painting covers the window before WebView2 itself is initialized.
+// Keep the native whale splash visible throughout startup and plugin installation.
 internal sealed class LoadingSurface : Control
 {
     private readonly Timer animation = new Timer { Interval = 40 };
     private readonly GraphicsPath logo = CreateLogo();
-    private readonly Panel installPanel = new Panel { Dock = DockStyle.Fill, Visible = false };
-    private readonly Label installTitle = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-    private readonly Label overallTitle = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-    private readonly ProgressBar singleProgress = new ProgressBar { Dock = DockStyle.Fill };
-    private readonly ProgressBar overallProgress = new ProgressBar { Dock = DockStyle.Fill };
-    private readonly RichTextBox installLog = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.FixedSingle, DetectUrls = false };
-    internal void BeginInstall()
-    {
-        if (installPanel.Controls.Count == 0) {
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(40, 65, 40, 35) };
-            foreach (int height in new int[] { 40, 24, 40, 24, 15 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.Controls.Add(installTitle, 0, 0); layout.Controls.Add(singleProgress, 0, 1);
-            layout.Controls.Add(overallTitle, 0, 2); layout.Controls.Add(overallProgress, 0, 3);
-            layout.Controls.Add(installLog, 0, 5); installPanel.Controls.Add(layout); Controls.Add(installPanel);
-            var exit = new Button { Text="×", Size=new Size(44,30), Location=new Point(Width-44,0), Anchor=AnchorStyles.Top|AnchorStyles.Right, FlatStyle=FlatStyle.Flat };
-            exit.FlatAppearance.BorderSize=0; exit.Click += delegate { FindForm().Close(); };
-            installPanel.Controls.Add(exit); exit.BringToFront();
-        }
-        installPanel.BackColor = installLog.BackColor = BackColor;
-        installLog.ForeColor = ForeColor; installLog.Font = new Font("Microsoft YaHei UI", 10);
-        installPanel.ForeColor = ForeColor;
-        installLog.Clear(); installTitle.Text = "正在检查下载源…"; overallTitle.Text = "整体安装进度：准备中";
-        singleProgress.Style = ProgressBarStyle.Marquee; overallProgress.Value = 0;
-        installPanel.Visible = true; installPanel.BringToFront();
-    }
-    internal void ReportInstall(System.Collections.Generic.Dictionary<string, object> row)
-    {
-        string plugin = Updates.Value(row, "title"), stage = Updates.Value(row, "stage");
-        int total = Convert.ToInt32(row["total"]), completed = Convert.ToInt32(row["completed"]);
-        if (total <= 0) total = 1;
-        installTitle.Text = plugin + " · " + Updates.Value(row, "message");
-        overallTitle.Text = "整体安装进度：" + completed + " / " + total;
-        overallProgress.Value = Math.Max(0, Math.Min(100, completed * 100 / total));
-        if (row["percent"] == null) singleProgress.Style = ProgressBarStyle.Marquee;
-        else {
-            singleProgress.Style = ProgressBarStyle.Continuous;
-            singleProgress.Value = Math.Max(0, Math.Min(100, Convert.ToInt32(row["percent"])));
-        }
-        if (installLog.Lines.Length > 150) {
-            var lines = installLog.Lines;
-            installLog.Lines = new System.Collections.Generic.List<string>(lines).GetRange(lines.Length - 100, 100).ToArray();
-        }
-        installLog.AppendText(DateTime.Now.ToString("HH:mm:ss") + " " + Updates.Value(row, "message") + Environment.NewLine);
-        installLog.SelectionStart = installLog.TextLength; installLog.ScrollToCaret();
-    }
-    internal void EndInstall() { installPanel.Visible = false; }
-
     private int frame;
-    private Color accent = Color.FromArgb(86,134,254);
+    private Color accent = Color.FromArgb(86,134,254), muted, track;
+    private bool installing;
+    private string pluginTitle = "", installStage = "正在检查下载源";
+    private string activePlugin = "";
+    private int totalPlugins = 1, completedPlugins, singlePercent = -1;
+    private DateTime stageChanged = DateTime.MinValue;
     internal bool Failed;
+
     internal LoadingSurface()
     {
         Dock = DockStyle.Fill;
@@ -75,31 +32,96 @@ internal sealed class LoadingSurface : Control
     }
     internal void ApplyTheme()
     {
-        // The splash is the first surface a user sees, so it reads the same
-        // cached skin as every other secondary window.
         var skin = SkinTheme.Load();
         BackColor = SkinTheme.ToColor(skin, "bg", Color.FromArgb(21,21,23));
         ForeColor = SkinTheme.ToColor(skin, "text", Color.FromArgb(235,238,242));
         accent = SkinTheme.ToColor(skin, "accent", Color.FromArgb(86,134,254));
+        muted = SkinTheme.ToColor(skin, "muted", SkinTheme.Mix(BackColor, ForeColor, .56f));
+        track = SkinTheme.Mix(BackColor, ForeColor, .10f);
+    }
+    internal void BeginInstall()
+    {
+        installing = true; Failed = false; activePlugin = ""; pluginTitle = "";
+        installStage = "正在检查下载源"; totalPlugins = 1; completedPlugins = 0; singlePercent = -1;
+        stageChanged = DateTime.MinValue; Invalidate();
+    }
+    internal void ReportInstall(System.Collections.Generic.Dictionary<string, object> row)
+    {
+        string plugin = Updates.Value(row, "plugin"), stage = Updates.Value(row, "stage");
+        bool changed = activePlugin != plugin;
+        activePlugin = plugin; pluginTitle = Updates.Value(row, "title");
+        totalPlugins = Math.Max(1, Convert.ToInt32(row["total"]));
+        completedPlugins = Math.Max(0, Math.Min(totalPlugins, Convert.ToInt32(row["completed"])));
+        singlePercent = row["percent"] == null ? -1 : Math.Max(0, Math.Min(100, Convert.ToInt32(row["percent"])));
+        string label;
+        switch(stage) {
+            case "download": label = "正在下载"; break;
+            case "cache": label = "正在复用缓存"; break;
+            case "install": label = "正在安装"; break;
+            case "verify": label = "正在校验"; break;
+            case "done": label = "安装完成"; break;
+            case "resolve": label = "正在准备依赖"; break;
+            case "dry-run": label = "正在准备安装"; break;
+            default: label = "正在处理依赖"; break;
+        }
+        // Package-manager events often alternate several times a second. Keep
+        // the visible stage calm while detailed diagnostics still go to disk.
+        if(changed || stage == "done" || (DateTime.UtcNow - stageChanged).TotalMilliseconds >= 1400) {
+            installStage = label; stageChanged = DateTime.UtcNow;
+        }
+        Invalidate();
+    }
+    internal void EndInstall() { installing = false; Invalidate(); }
+    private void Bar(Graphics g, RectangleF bounds, int percent, bool secondary)
+    {
+        using(var path = SkinSurface.Rounded(Rectangle.Round(bounds), 2))
+        using(var brush = new SolidBrush(track)) g.FillPath(brush,path);
+        var saved = g.Save();
+        g.SetClip(bounds);
+        float width = percent < 0 ? bounds.Width * .24f : bounds.Width * percent / 100f;
+        float left = percent < 0 ? bounds.X - width + (frame % 90) / 89f * (bounds.Width + width) : bounds.X;
+        if(width > 0) using(var path = SkinSurface.Rounded(Rectangle.Round(new RectangleF(left,bounds.Y,width,bounds.Height)),2))
+        using(var brush = new SolidBrush(secondary ? SkinTheme.Mix(BackColor, accent, .72f) : accent)) g.FillPath(brush,path);
+        g.Restore(saved);
     }
     protected override void OnPaint(PaintEventArgs e)
     {
         var g=e.Graphics; g.Clear(BackColor); g.SmoothingMode=SmoothingMode.AntiAlias;
-        float wave = Failed ? 0 : (float)Math.Sin(frame / 15.0);
+        g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        float center=Height/2f, top=installing ? center-155 : center-75;
+        float wave=Failed?0:(float)Math.Sin(frame/15.0);
         var saved=g.Save();
-        g.TranslateTransform(Width/2f-58,Height/2f-75+wave*3); g.ScaleTransform(5,5);
-        using(var brush=new SolidBrush(Color.FromArgb(Failed?170:(int)(215+wave*35),ForeColor)))g.FillPath(brush,logo);
+        g.TranslateTransform(Width/2f-58,top+wave*3); g.ScaleTransform(5,5);
+        using(var brush=new SolidBrush(Color.FromArgb(Failed?170:(int)(220+wave*25),ForeColor)))g.FillPath(brush,logo);
         g.Restore(saved);
         using(var name=new Font("Segoe UI",17,FontStyle.Regular))
         using(var small=new Font("Microsoft YaHei UI",10))
+        using(var caption=new Font("Microsoft YaHei UI",8.5f))
         using(var brush=new SolidBrush(ForeColor))
-        using(var format=new StringFormat { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center }) {
-            g.DrawString("DeepSeek Harness",name,brush,new RectangleF(0,Height/2f+30,Width,40),format);
-            g.DrawString(Text,small,brush,new RectangleF(35,Math.Max(Height/2f+90,Height-125),Width-70,90),format);
-            g.DrawString("×",name,brush,new RectangleF(Width-44,0,44,30),format);
+        using(var dim=new SolidBrush(muted))
+        using(var centered=new StringFormat { Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap }) {
+            g.DrawString("DeepSeek Harness",name,brush,new RectangleF(0,top+105,Width,40),centered);
+            g.DrawString("×",name,dim,new RectangleF(Width-44,0,44,30),centered);
+            if(installing && !Failed) {
+                float width=Math.Min(360,Width-80),x=(Width-width)/2;
+                g.DrawString(pluginTitle==""?"正在准备推荐插件":pluginTitle,small,brush,new RectangleF(x,center+16,width,28),centered);
+                g.DrawString(installStage+"…",caption,dim,new RectangleF(x,center+46,width,24),centered);
+                using(var left=new StringFormat {Alignment=StringAlignment.Near})
+                using(var right=new StringFormat {Alignment=StringAlignment.Far}) {
+                    g.DrawString("当前插件",caption,dim,new RectangleF(x,center+89,width,20),left);
+                    g.DrawString(singlePercent<0?"进行中":singlePercent+"%",caption,dim,new RectangleF(x,center+89,width,20),right);
+                    Bar(g,new RectangleF(x,center+114,width,4),singlePercent,false);
+                    g.DrawString("整体进度",caption,dim,new RectangleF(x,center+137,width,20),left);
+                    g.DrawString(completedPlugins+" / "+totalPlugins,caption,dim,new RectangleF(x,center+137,width,20),right);
+                    Bar(g,new RectangleF(x,center+162,width,3),completedPlugins*100/totalPlugins,true);
+                }
+            } else {
+                using(var wrapped=new StringFormat { Alignment=StringAlignment.Center, LineAlignment=StringAlignment.Center })
+                    g.DrawString(Text,small,brush,new RectangleF(35,Math.Max(center+90,Height-125),Width-70,90),wrapped);
+                if(!Failed)for(int i=0;i<3;i++)using(var dot=new SolidBrush(Color.FromArgb(80+(int)(150*(.5+.5*Math.Sin(frame/8.0-i))),accent)))
+                    g.FillEllipse(dot,Width/2f-18+i*15,center+85,6,6);
+            }
         }
-        if(!Failed)for(int i=0;i<3;i++)using(var brush=new SolidBrush(Color.FromArgb(80+(int)(150*(.5+.5*Math.Sin(frame/8.0-i))),accent)))
-            g.FillEllipse(brush,Width/2f-18+i*15,Height/2f+85,6,6);
     }
     protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
     protected override void Dispose(bool disposing) { if(disposing){animation.Dispose();logo.Dispose();}base.Dispose(disposing); }

@@ -49,8 +49,8 @@ internal sealed class PluginPicker : Form
         ShowInTaskbar = false;
         MinimizeBox = false;
         MaximizeBox = false;
-        ClientSize = new Size(860, 720);
-        MinimumSize = new Size(720, 560);
+        ClientSize = new Size(620, 690);
+        MinimumSize = new Size(560, 560);
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         DoubleBuffered = true;
@@ -59,7 +59,7 @@ internal sealed class PluginPicker : Form
         ForeColor = text;
 
         heading.Text = "选择推荐插件";
-        subtitle.Text = "选择安装后，插件市场、代理和网络配置会自动包含且不能取消；选择“暂不安装”则不安装任何插件。其余插件可逐项勾选，安装前会检测网络，直连不可用时自动切换镜像源。";
+        subtitle.Text = "按需选择插件，必需组件会自动包含。也可以稍后在插件市场安装。";
         summary.Text = "";
 
         scroll.AutoScroll = true;
@@ -120,7 +120,7 @@ internal sealed class PluginPicker : Form
         var required = new List<RecommendedPlugin>();
         foreach (RecommendedPlugin plugin in catalog)
             if (plugin.Required) required.Add(plugin);
-        AddSection("必需组件", "选择安装时，以下三件是后续安装和管理插件的基础，始终包含。", required);
+        AddSection("必需组件", "", required);
 
         string[] categories = { "主题", "辅助", "布局", "功能" };
         var seen = new HashSet<string>();
@@ -143,13 +143,13 @@ internal sealed class PluginPicker : Form
         Label header = new Label();
         header.Text = category;
         header.AutoSize = false;
-        header.Height = 32;
+        header.Height = 26;
         header.ForeColor = text;
         header.BackColor = background;
         header.Padding = new Padding(4, 4, 0, 0);
         content.Controls.Add(header);
         layoutOrder.Add(header);
-        SetFont(header, 11f, FontStyle.Bold);
+        SetFont(header, 10f, FontStyle.Bold);
 
         if (!String.IsNullOrEmpty(note))
         {
@@ -176,17 +176,21 @@ internal sealed class PluginPicker : Form
     private Control CreateRow(RecommendedPlugin plugin)
     {
         SkinSurface row = new SkinSurface();
-        row.Height = 64;
+        row.Height = 58;
         row.BackColor = background;
         row.Surface = surface;
         row.Border = border;
-        row.Radius = radius;
+        row.Radius = radiusSm;
 
-        CheckBox check = new CheckBox();
+        PluginToggle check = new PluginToggle();
+        check.SurfaceColor = surface; check.BorderColor = SkinTheme.Mix(surface, text, .3f);
+        check.AccentColor = accent; check.TextColor = text; check.Locked = plugin.Required;
+        check.AccessibleName = plugin.Title;
+        check.Cursor = plugin.Required ? Cursors.Default : Cursors.Hand;
         check.Text = "";
         check.AutoSize = false;
-        check.Size = new Size(22, 22);
-        check.Location = new Point(14, 20);
+        check.Size = new Size(24, 24);
+        check.Location = new Point(10, 17);
         check.Checked = true;
         check.AutoCheck = !plugin.Required;
         check.TabStop = !plugin.Required;
@@ -204,6 +208,7 @@ internal sealed class PluginPicker : Form
         title.Text = plugin.Title + (plugin.Required ? "  ·  必需" : "");
         title.AutoSize = false;
         title.Height = 22;
+        title.AutoEllipsis = true;
         title.ForeColor = text;
         title.BackColor = surface;
 
@@ -216,10 +221,10 @@ internal sealed class PluginPicker : Form
         description.AutoEllipsis = true;
 
         Label link = new Label();
-        link.Text = "查看功能 ↗";
+        link.Text = "详情 ↗";
         link.AutoSize = false;
         link.Height = 18;
-        link.Width = 96;
+        link.Width = 64;
         link.TextAlign = ContentAlignment.MiddleRight;
         link.ForeColor = accent;
         link.BackColor = surface;
@@ -227,6 +232,11 @@ internal sealed class PluginPicker : Form
         link.Visible = !String.IsNullOrEmpty(plugin.Url);
         link.Click += delegate { OpenUrl(plugin.Url); };
 
+        if (!plugin.Required) {
+            EventHandler toggle = delegate { check.Checked = !check.Checked; };
+            row.Click += toggle; title.Click += toggle; description.Click += toggle;
+            row.Cursor = title.Cursor = description.Cursor = Cursors.Hand;
+        }
         row.Controls.Add(check);
         row.Controls.Add(title);
         row.Controls.Add(description);
@@ -237,20 +247,18 @@ internal sealed class PluginPicker : Form
         tips.SetToolTip(title, plugin.Name + " " + plugin.Version);
         tips.SetToolTip(description, plugin.Description);
         if (!String.IsNullOrEmpty(plugin.Url)) tips.SetToolTip(link, plugin.Url);
-        SetFont(title, 10f, FontStyle.Bold);
+        SetFont(title, 9.5f, FontStyle.Bold);
         SetFont(description, 8.5f, FontStyle.Regular);
-        SetFont(link, 8.5f, FontStyle.Underline);
+        SetFont(link, 8.5f, FontStyle.Regular);
         SetFont(check, 9f, FontStyle.Regular);
         return row;
     }
 
     private static void LayoutRow(Control row, Label title, Label description, Label link)
     {
-        title.SetBounds(48, 8, Math.Max(100, row.Width - 62), 22);
-        // Reserve the link column even while the form is not visible yet:
-        // Control.Visible is false until the parent is shown.
-        description.SetBounds(48, 32, Math.Max(120, row.Width - 58 - 104), 20);
-        link.SetBounds(Math.Max(48, row.Width - 110), 32, 96, 18);
+        title.SetBounds(44, 7, Math.Max(100, row.Width - 128), 22);
+        description.SetBounds(44, 30, Math.Max(120, row.Width - 128), 20);
+        link.SetBounds(Math.Max(44, row.Width - 76), 18, 64, 22);
     }
 
     private void ApplySkin()
@@ -278,16 +286,17 @@ internal sealed class PluginPicker : Form
 
     private void LayoutChrome()
     {
-        int margin = 20;
-        heading.SetBounds(margin, 14, ClientSize.Width - margin * 2, 32);
-        subtitle.SetBounds(margin, 50, ClientSize.Width - margin * 2, 36);
-        scroll.SetBounds(margin, 96, ClientSize.Width - margin * 2, Math.Max(120, ClientSize.Height - 190));
-        int y = ClientSize.Height - 72;
-        install.SetBounds(ClientSize.Width - margin - 120, y, 120, 40);
-        cancel.SetBounds(install.Left - 10 - 104, y, 104, 40);
-        selectNone.SetBounds(cancel.Left - 10 - 88, y, 88, 40);
-        selectAll.SetBounds(selectNone.Left - 10 - 88, y, 88, 40);
-        summary.SetBounds(margin + 4, y + 10, Math.Max(160, selectAll.Left - margin - 12), 24);
+        int margin = 24;
+        heading.SetBounds(margin, 18, ClientSize.Width - margin * 2, 32);
+        subtitle.SetBounds(margin, 59, ClientSize.Width - margin * 2, 36);
+        scroll.SetBounds(margin, 103, ClientSize.Width - margin * 2, Math.Max(120, ClientSize.Height - 223));
+        int y = ClientSize.Height - 58;
+        install.SetBounds(ClientSize.Width - margin - 112, y, 112, 34);
+        cancel.SetBounds(install.Left - 10 - 96, y, 96, 34);
+        int selectionY = ClientSize.Height - 103;
+        selectNone.SetBounds(ClientSize.Width - margin - 66, selectionY, 66, 28);
+        selectAll.SetBounds(selectNone.Left - 6 - 54, selectionY, 54, 28);
+        summary.SetBounds(margin + 2, selectionY + 4, Math.Max(160, selectAll.Left - margin - 12), 24);
         LayoutContent();
     }
 
@@ -302,7 +311,7 @@ internal sealed class PluginPicker : Form
             control.Left = 0;
             control.Width = width;
             control.Top = y;
-            y += control.Height + 8;
+            y += control.Height + 6;
         }
         content.Height = y + 4;
     }
@@ -362,5 +371,46 @@ internal sealed class PluginPicker : Form
             fonts.Clear();
         }
         base.Dispose(disposing);
+    }
+}
+
+
+// Retain native checkbox keyboard/accessibility behavior, draw the themed glyph ourselves.
+internal sealed class PluginToggle : CheckBox
+{
+    internal Color SurfaceColor, BorderColor, AccentColor, TextColor;
+    internal bool Locked;
+    private bool hovering;
+    internal PluginToggle()
+    {
+        AutoSize=false; Size=new Size(24,24); FlatStyle=FlatStyle.Flat;
+        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.SupportsTransparentBackColor,true);
+        BackColor=Color.Transparent;
+    }
+    protected override void OnMouseEnter(EventArgs e){base.OnMouseEnter(e);hovering=true;Invalidate();}
+    protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);hovering=false;Invalidate();}
+    protected override void OnCheckedChanged(EventArgs e){base.OnCheckedChanged(e);Invalidate();}
+    protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+    protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        float scale=Math.Min(Width,Height)/24f;
+        var box=new Rectangle((int)(3*scale),(int)(3*scale),(int)(18*scale),(int)(18*scale));
+        Color fill=Checked?(Locked?SkinTheme.Mix(SurfaceColor,TextColor,.16f):AccentColor):SurfaceColor;
+        Color outline=Checked?fill:(hovering?AccentColor:BorderColor);
+        using(var path=SkinSurface.Rounded(box,Math.Max(3,(int)(5*scale))))
+        using(var brush=new SolidBrush(fill))
+        using(var pen=new Pen(outline,1.2f*scale)){g.FillPath(brush,path);g.DrawPath(pen,path);}
+        if(Checked){
+            float light=(fill.R*.299f+fill.G*.587f+fill.B*.114f)/255;
+            Color tick=Locked?SkinTheme.Mix(SurfaceColor,TextColor,.6f):(light>.62f?Color.FromArgb(25,25,28):Color.White);
+            using(var pen=new Pen(tick,1.8f*scale)){
+                pen.StartCap=pen.EndCap=System.Drawing.Drawing2D.LineCap.Round;
+                pen.LineJoin=System.Drawing.Drawing2D.LineJoin.Round;
+                g.DrawLines(pen,new PointF[]{new PointF(7*scale,12*scale),new PointF(10.4f*scale,15.4f*scale),new PointF(17*scale,8.8f*scale)});
+            }
+        }
+        if(Focused&&!Locked)using(var pen=new Pen(AccentColor,1))using(var path=SkinSurface.Rounded(new Rectangle(0,0,Width-1,Height-1),7))g.DrawPath(pen,path);
     }
 }

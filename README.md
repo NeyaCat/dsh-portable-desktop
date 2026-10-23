@@ -75,7 +75,9 @@ desktop/vendor/webview2  Microsoft WebView2 SDK 1.0.2903.40 及其许可证
 desktop/Test-*.ps1       手动集成测试（运行前请先关闭程序）
 packaging/               从源码构建便携包与 ZIP
 .github/workflows/       发布流水线
-DeepSeek Harness.ico     传给编译器的程序图标
+assets/dsh-app.ico       主程序鲸鱼图标（编译时嵌入）
+assets/version-switch.ico  版本切换工具的独立图标（编译时嵌入）
+assets/version-switch.svg  版本切换图标的矢量资源
 ```
 
 ## 🧪 自测

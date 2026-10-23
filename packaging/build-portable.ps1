@@ -170,7 +170,6 @@ try {
     Write-Ok "Bundled Node.js: $(& $nodeExe --version)"
 
     Write-Step "Compiling the desktop shell (v$Version)"
-    Copy-Item -LiteralPath (Join-Path $repo 'DeepSeek Harness.ico') -Destination $payload -Force
     & (Join-Path $repo 'desktop\Build.ps1') -AppRoot $payload -Version $Version
     foreach ($exe in @('DeepSeek Harness.exe', 'Version Switch.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $payload $exe))) {

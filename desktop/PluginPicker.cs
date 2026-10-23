@@ -11,8 +11,8 @@ internal sealed class PluginPicker : Form
 {
     private readonly List<RecommendedPlugin> catalog;
     private readonly Dictionary<string, string> skin;
-    private readonly List<CheckBox> optionalChecks = new List<CheckBox>();
-    private readonly Dictionary<RecommendedPlugin, CheckBox> checkByPlugin = new Dictionary<RecommendedPlugin, CheckBox>();
+    private readonly List<PluginToggle> optionalChecks = new List<PluginToggle>();
+    private readonly Dictionary<RecommendedPlugin, PluginToggle> checkByPlugin = new Dictionary<RecommendedPlugin, PluginToggle>();
     private readonly List<Control> layoutOrder = new List<Control>();
     private readonly List<Font> fonts = new List<Font>();
     private readonly ToolTip tips = new ToolTip();
@@ -22,7 +22,7 @@ internal sealed class PluginPicker : Form
     private readonly Label heading = new Label();
     private readonly Label subtitle = new Label();
     private readonly Label summary = new Label();
-    private readonly Panel scroll = new Panel();
+    private readonly PluginViewport scroll = new PluginViewport();
     private readonly Panel content = new Panel();
     private readonly ExitActionButton selectAll = new ExitActionButton();
     private readonly ExitActionButton selectNone = new ExitActionButton();
@@ -62,11 +62,12 @@ internal sealed class PluginPicker : Form
         subtitle.Text = "按需选择插件，必需组件会自动包含。也可以稍后在插件市场安装。";
         summary.Text = "";
 
-        scroll.AutoScroll = true;
+        scroll.AutoScroll = false;
+        scroll.ForeColor = text;
         scroll.BackColor = background;
         scroll.BorderStyle = BorderStyle.None;
         content.BackColor = background;
-        scroll.Controls.Add(content);
+        scroll.Attach(content);
 
         selectAll.Text = "全选";
         selectNone.Text = "全不选";
@@ -107,7 +108,7 @@ internal sealed class PluginPicker : Form
                 if (plugin.Required) names.Add(plugin.Name);
             foreach (RecommendedPlugin plugin in catalog)
             {
-                CheckBox check;
+                PluginToggle check;
                 if (!plugin.Required && checkByPlugin.TryGetValue(plugin, out check) && check.Checked)
                     names.Add(plugin.Name);
             }
@@ -196,7 +197,6 @@ internal sealed class PluginPicker : Form
         check.TabStop = !plugin.Required;
         check.BackColor = surface;
         check.ForeColor = text;
-        check.FlatStyle = FlatStyle.Flat;
         if (!plugin.Required)
         {
             optionalChecks.Add(check);
@@ -302,7 +302,7 @@ internal sealed class PluginPicker : Form
 
     private void LayoutContent()
     {
-        int width = scroll.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 2;
+        int width = scroll.ContentWidth;
         if (width < 240) width = 240;
         content.Width = width;
         int y = 0;
@@ -318,7 +318,7 @@ internal sealed class PluginPicker : Form
 
     private void SetOptional(bool value)
     {
-        foreach (CheckBox check in optionalChecks) check.Checked = value;
+        foreach (PluginToggle check in optionalChecks) check.Checked = value;
         UpdateSummary();
     }
 
@@ -327,7 +327,7 @@ internal sealed class PluginPicker : Form
         int required = 0, selected = 0;
         foreach (RecommendedPlugin plugin in catalog)
             if (plugin.Required) { required++; selected++; }
-        foreach (CheckBox check in optionalChecks)
+        foreach (PluginToggle check in optionalChecks)
             if (check.Checked) selected++;
         summary.Text = "已选择 " + selected + " 个插件（" + required + " 个必需）";
     }
@@ -375,30 +375,48 @@ internal sealed class PluginPicker : Form
 }
 
 
-// Retain native checkbox keyboard/accessibility behavior, draw the themed glyph ourselves.
-internal sealed class PluginToggle : CheckBox
+// Fully painted control: no native BUTTON/CheckBox window can paint a second glyph.
+internal sealed class PluginToggle : Control
 {
     internal Color SurfaceColor, BorderColor, AccentColor, TextColor;
     internal bool Locked;
-    private bool hovering;
+    internal bool AutoCheck = true;
+    private bool selected, hovering, spaceHeld;
+    internal event EventHandler CheckedChanged;
+    internal bool Checked
+    {
+        get { return selected; }
+        set { if(selected==value)return; selected=value; Invalidate(); if(CheckedChanged!=null)CheckedChanged(this,EventArgs.Empty); AccessibilityNotifyClients(AccessibleEvents.StateChange,-1); }
+    }
     internal PluginToggle()
     {
-        AutoSize=false; Size=new Size(24,24); FlatStyle=FlatStyle.Flat;
-        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.SupportsTransparentBackColor,true);
-        BackColor=Color.Transparent;
+        Size=new Size(24,24); TabStop=true; AccessibleRole=AccessibleRole.CheckButton;
+        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable,true);
     }
+    protected override AccessibleObject CreateAccessibilityInstance() { return new ToggleAccessibility(this); }
+    private sealed class ToggleAccessibility : ControlAccessibleObject
+    {
+        private readonly PluginToggle toggle;
+        internal ToggleAccessibility(PluginToggle owner):base(owner) { toggle=owner; }
+        public override AccessibleStates State { get { return base.State | (toggle.Checked?AccessibleStates.Checked:AccessibleStates.None) | (toggle.Locked?AccessibleStates.ReadOnly:AccessibleStates.None); } }
+        public override string DefaultAction { get { return toggle.Locked?"":"Toggle"; } }
+        public override void DoDefaultAction() { if(!toggle.Locked&&toggle.AutoCheck)toggle.Checked=!toggle.Checked; }
+    }
+    protected override void OnClick(EventArgs e) { if(!Locked&&AutoCheck){Focus();Checked=!Checked;}base.OnClick(e); }
+    protected override void OnKeyDown(KeyEventArgs e) { if(e.KeyCode==Keys.Space){spaceHeld=true;e.Handled=e.SuppressKeyPress=true;}base.OnKeyDown(e); }
+    protected override void OnKeyUp(KeyEventArgs e) { if(e.KeyCode==Keys.Space){if(spaceHeld&&!Locked&&AutoCheck)Checked=!Checked;spaceHeld=false;e.Handled=e.SuppressKeyPress=true;}base.OnKeyUp(e); }
     protected override void OnMouseEnter(EventArgs e){base.OnMouseEnter(e);hovering=true;Invalidate();}
     protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);hovering=false;Invalidate();}
-    protected override void OnCheckedChanged(EventArgs e){base.OnCheckedChanged(e);Invalidate();}
     protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
-    protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+    protected override void OnLostFocus(EventArgs e){spaceHeld=false;base.OnLostFocus(e);Invalidate();}
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var g=e.Graphics;g.Clear(BackColor);g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         float scale=Math.Min(Width,Height)/24f;
         var box=new Rectangle((int)(3*scale),(int)(3*scale),(int)(18*scale),(int)(18*scale));
         Color fill=Checked?(Locked?SkinTheme.Mix(SurfaceColor,TextColor,.16f):AccentColor):SurfaceColor;
-        Color outline=Checked?fill:(hovering?AccentColor:BorderColor);
+        bool highlighted=!Locked&&(hovering||Focused);
+        Color outline=Checked?(highlighted?SkinTheme.Mix(fill,TextColor,.35f):fill):(highlighted?AccentColor:BorderColor);
         using(var path=SkinSurface.Rounded(box,Math.Max(3,(int)(5*scale))))
         using(var brush=new SolidBrush(fill))
         using(var pen=new Pen(outline,1.2f*scale)){g.FillPath(brush,path);g.DrawPath(pen,path);}
@@ -411,6 +429,116 @@ internal sealed class PluginToggle : CheckBox
                 g.DrawLines(pen,new PointF[]{new PointF(7*scale,12*scale),new PointF(10.4f*scale,15.4f*scale),new PointF(17*scale,8.8f*scale)});
             }
         }
-        if(Focused&&!Locked)using(var pen=new Pen(AccentColor,1))using(var path=SkinSurface.Rounded(new Rectangle(0,0,Width-1,Height-1),7))g.DrawPath(pen,path);
+    }
+}
+
+// Clip the list without WS_VSCROLL/AutoScroll; the rail below owns all scrolling.
+internal sealed class PluginViewport : Panel
+{
+    private readonly PluginScrollRail rail=new PluginScrollRail();
+    private Control body;
+    internal int ContentWidth { get { return Math.Max(0,ClientSize.Width-rail.Width-6); } }
+    internal PluginViewport()
+    {
+        AutoScroll=false; TabStop=false;
+        SetStyle(ControlStyles.OptimizedDoubleBuffer|ControlStyles.AllPaintingInWmPaint,true);
+        Controls.Add(rail);
+        rail.ValueChanged+=delegate { if(body!=null)body.Top=-rail.Value; };
+    }
+    internal void Attach(Control content)
+    {
+        body=content; Controls.Add(content); rail.BringToFront();
+        content.SizeChanged+=delegate { UpdateRange(); };
+        content.ControlAdded+=delegate(object sender,ControlEventArgs e) { WatchFocus(e.Control); };
+    }
+    private void WatchFocus(Control control)
+    {
+        control.Enter+=delegate { Reveal(control); };
+        foreach(Control child in control.Controls)WatchFocus(child);
+        control.ControlAdded+=delegate(object sender,ControlEventArgs e) { WatchFocus(e.Control); };
+    }
+    private void Reveal(Control control)
+    {
+        if(body==null)return;
+        Point point=body.PointToClient(control.PointToScreen(Point.Empty));
+        if(point.Y<rail.Value)rail.Value=point.Y-8;
+        else if(point.Y+control.Height>rail.Value+ClientSize.Height)rail.Value=point.Y+control.Height-ClientSize.Height+8;
+    }
+    internal void ScrollBy(int pixels) { rail.Value+=pixels; }
+    private void UpdateRange()
+    {
+        if(body==null)return;
+        rail.SetRange(body.Height,ClientSize.Height);
+        rail.Visible=body.Height>ClientSize.Height;
+        rail.BackColor=BackColor; rail.ForeColor=ForeColor; rail.BringToFront();
+        body.Top=-rail.Value;
+    }
+    protected override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        if(rail==null)return;
+        rail.SetBounds(Math.Max(0,ClientSize.Width-14),0,14,ClientSize.Height);
+        UpdateRange();
+    }
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        int lines=SystemInformation.MouseWheelScrollLines;
+        ScrollBy((int)Math.Round(-e.Delta/120f*(lines<0?ClientSize.Height:Math.Max(1,lines)*22)));
+        var handled=e as HandledMouseEventArgs;if(handled!=null)handled.Handled=true;
+    }
+}
+
+internal sealed class PluginScrollRail : Control
+{
+    private int value,maximum,viewport,total,dragOffset;
+    private bool hovering,dragging;
+    internal event EventHandler ValueChanged;
+    internal int Value {
+        get { return value; }
+        set { int next=Math.Max(0,Math.Min(maximum,value));if(this.value==next)return;this.value=next;Invalidate();if(ValueChanged!=null)ValueChanged(this,EventArgs.Empty); }
+    }
+    internal PluginScrollRail()
+    {
+        Width=14;TabStop=false;Cursor=Cursors.Hand;
+        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
+    }
+    internal void SetRange(int contentHeight,int viewportHeight) {
+        total=contentHeight;viewport=viewportHeight;maximum=Math.Max(0,total-viewport);Value=value;Invalidate();
+    }
+    private Rectangle Thumb {
+        get {
+            int usable=Math.Max(1,Height-4);
+            int length=Math.Min(usable,Math.Max(36,(int)((long)usable*Math.Max(1,viewport)/Math.Max(1,total))));
+            int y=2+(maximum==0?0:(int)((long)value*(usable-length)/maximum));
+            int width=hovering||dragging?8:6;
+            return new Rectangle((Width-width)/2,y,width,length);
+        }
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+        e.Graphics.Clear(BackColor);if(maximum==0)return;
+        e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        Rectangle thumb=Thumb;
+        using(var path=SkinSurface.Rounded(thumb,thumb.Width/2))
+        using(var brush=new SolidBrush(SkinTheme.Mix(BackColor,ForeColor,dragging ? .52f : hovering ? .40f : .25f)))e.Graphics.FillPath(brush,path);
+    }
+    protected override void OnMouseEnter(EventArgs e){base.OnMouseEnter(e);hovering=true;Invalidate();}
+    protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);hovering=false;Invalidate();}
+    protected override void OnMouseDown(MouseEventArgs e){
+        base.OnMouseDown(e);if(e.Button!=MouseButtons.Left)return;
+        Rectangle thumb=Thumb;
+        if(e.Y<thumb.Top||e.Y>thumb.Bottom)Value+=(e.Y<thumb.Top?-1:1)*Math.Max(1,viewport-32);
+        else {dragging=true;dragOffset=e.Y-thumb.Top;Capture=true;Invalidate();}
+    }
+    protected override void OnMouseMove(MouseEventArgs e){
+        base.OnMouseMove(e);if(!dragging)return;
+        int travel=Math.Max(1,Height-4-Thumb.Height);
+        Value=(int)((long)(e.Y-dragOffset-2)*maximum/travel);
+    }
+    protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left){dragging=false;Capture=false;Invalidate();}}
+    protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(!Capture){dragging=false;Invalidate();}}
+    protected override void OnMouseWheel(MouseEventArgs e){
+        var parent=Parent as PluginViewport;
+        if(parent!=null)parent.ScrollBy((int)Math.Round(-e.Delta/120f*66));
+        var handled=e as HandledMouseEventArgs;if(handled!=null)handled.Handled=true;
     }
 }

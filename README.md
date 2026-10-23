@@ -33,7 +33,7 @@ DSH Portable Desktop 是一个自带运行环境的 Windows x64 桌面外壳：�
 | 🌐 | **安装代理桥** | 读取 `dsh-network-config` 的网络模式，把代理同时交给后端进程与每个 profile 的 `.npmrc`，并让 git 的 GitHub SSH 地址改写为 HTTPS；`direct` 模式会清除这些设置 |
 | 🧹 | **残留锁自愈** | 启动时清理被中断的安装留下的 `.plugin-manager/run.json` 与 `package.json.lock`（PID 已退出且记录超过 2 分钟才动） |
 | 🩺 | **首次启动体检** | 检查系统版本、数据目录、Node.js、DSH、Git、pnpm 与 WebView2；可自动下载便携 Git/pnpm，WebView2 缺失时可自动安装或引导安装 |
-| 🧩 | **推荐插件选择** | 首次启动按「主题 / 辅助 / 布局 / 功能」分组展示 15 个插件，可勾选安装并打开介绍页；选择安装时插件市场、HTTP 代理、网络配置固定包含 |
+| 🧩 | **推荐插件选择** | 首次启动按「主题 / 辅助 / 布局 / 功能」分组展示 15 个插件，可勾选安装并打开介绍页；插件市场、HTTP 代理、网络配置必须安装成功，才能进入软件 |
 | 📦 | **便携** | 配置、会话、日志、WebView2 数据、Node.js、DSH、Git、pnpm 都在 EXE 旁；发布包可选内置 WebView2 固定版本，去掉对系统运行时的依赖 |
 | 🔒 | **仅本机** | 界面只监听 `127.0.0.1` 的随机空闲端口；外部链接交给默认浏览器 |
 
@@ -47,7 +47,9 @@ DSH Portable Desktop 是一个自带运行环境的 Windows x64 桌面外壳：�
 
 首次启动会执行一次环境体检，并把结果写入 `data/environment-check.json`。Git/pnpm 缺失时会询问是否自动补全；选择“否”后不再自动询问，可随时运行 `DeepSeek Harness.exe --repair-environment` 修复，或用 `--verify-environment` 生成 `data/environment-check.txt` 检查报告。
 
-体检通过后会打开推荐插件选择窗口：选择安装时，插件市场、HTTP 代理、网络配置三项固定包含；其余插件默认勾选、可逐项取消，点击「查看功能」打开对应说明页；选择「暂不安装」则不安装任何插件。安装时先装三个必需插件，再装其他插件；直连 npm/GitHub 不可用时自动切换 npmmirror 与 gh-proxy 镜像。
+首次启动会查询官方 latest 推荐 DSH 版本；新包默认内置打包时的最新推荐版，若已有更新则先验证并准备新版，再安装插件。已有版本选择和用户环境保持原样。
+
+体检通过后会打开推荐插件选择窗口：插件市场、HTTP 代理、网络配置三项必装，窗口不能关闭、不能用 Esc 跳过；其余插件默认勾选、可逐项取消，也可选择「仅安装必需组件」。三个组件校验成功后才进入软件，失败会提示重试。已有 profile 缺少组件时，只补装必需组件并保留原插件与配置。直连 npm/GitHub 不可用时自动使用镜像。
 
 **卸载**：退出程序后直接删除整个文件夹即可 —— 不写注册表，不在系统目录留东西。
 
@@ -113,7 +115,7 @@ MIT —— 见 [LICENSE](LICENSE)。随包分发的第三方组件各自保留�
 默认构建标准版（使用系统 WebView2，缺失时首次启动可安装）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build-portable.ps1 -Version 0.1.2 -Flavor standard -ReleaseNotesFile .\release-notes\0.1.2.md
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build-portable.ps1 -Version 0.2.0 -Flavor standard -ReleaseNotesFile .\release-notes\0.2.0.md
 ```
 
 完整版使用 `-Flavor full`，内置 WebView2。原有 `-BundleWebView2` 参数仍兼容。

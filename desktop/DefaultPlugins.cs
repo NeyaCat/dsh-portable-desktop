@@ -73,7 +73,7 @@ internal static class DefaultPlugins
         return result;
     }
 
-    internal static bool Install(string root, string home, ProxyBridge bridge, Action<string> log, IList<string> selected, Action<Dictionary<string, object>> progress = null, string runtimeRoot = null)
+    internal static bool Install(string root, string home, ProxyBridge bridge, Action<string> log, IList<string> selected, Action<Dictionary<string, object>> progress = null, string runtimeRoot = null, bool repairRequired = false)
     {
         try
         {
@@ -91,11 +91,11 @@ internal static class DefaultPlugins
 
             var names = new List<string>();
             if (selected != null) foreach (string name in selected) if (!String.IsNullOrEmpty(name)) names.Add(name);
-            bool ok = RunInstaller(root, home, node, script, bridge, log, names, mirror, progress, runtimeRoot);
+            bool ok = RunInstaller(root, home, node, script, bridge, log, names, mirror, progress, runtimeRoot, false, null, repairRequired);
             if (!ok && !mirror)
             {
                 log("Recommended plugins: direct install failed, retrying through mirrors");
-                ok = RunInstaller(root, home, node, script, bridge, log, names, true, progress, runtimeRoot);
+                ok = RunInstaller(root, home, node, script, bridge, log, names, true, progress, runtimeRoot, false, null, repairRequired);
             }
             return ok;
         }
@@ -107,7 +107,7 @@ internal static class DefaultPlugins
     }
 
     private static bool RunInstaller(string root, string home, string node, string script,
-        ProxyBridge bridge, Action<string> log, List<string> names, bool mirror, Action<Dictionary<string, object>> progress = null, string runtimeRoot = null, bool validateOnly = false, string disable = null)
+        ProxyBridge bridge, Action<string> log, List<string> names, bool mirror, Action<Dictionary<string, object>> progress = null, string runtimeRoot = null, bool validateOnly = false, string disable = null, bool repairRequired = false)
     {
         lock(jobLock) if(cancelled) return false;
         var info = new ProcessStartInfo(node);
@@ -117,6 +117,7 @@ internal static class DefaultPlugins
         string homeArg = home.TrimEnd('\\');
         string arguments = "\"" + script + "\" --root \"" + rootArg + "\" --home \"" + homeArg + "\" --plugins \"" +
             String.Join(",", names.ToArray()) + "\"";
+        if (repairRequired) arguments += " --repair-required";
         if (mirror) arguments += " --mirror";
         if (validateOnly) arguments += " --validate-only";
         if (!String.IsNullOrEmpty(disable)) arguments += " --disable-plugins \"" + disable + "\"";

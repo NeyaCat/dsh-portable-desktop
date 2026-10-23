@@ -31,3 +31,12 @@ test('readiness detects a mounted app independently of private theme classes and
  vm.runInNewContext(source.slice(start,end),context);tick();tick();tick();assert.equal(messages.length,0);
  boot=false;tick();tick();tick();assert.deepEqual(messages,['ui-ready']);assert.equal(cleared,true);
 });
+
+test('repairing mandatory plugins retains existing plugin pins, bundle choices and configuration',async()=>{
+ const home=await temp(),profile=path.join(home,'profiles/web');await fs.mkdir(profile,{recursive:true});
+ await fs.writeFile(path.join(profile,'package.json'),JSON.stringify({name:'existing',dependencies:{'user-plugin':'2.3.4','dsh-dream-skin':'10.0.0'},dsh:{profile:{bundles:['@deepseek-ai/dsh-base','user-plugin']}}}));
+ await fs.writeFile(path.join(profile,'cordis.patch.yml'),'- id: user\n  name: user-plugin\n  config:\n    value: preserve-me\n- id: proxy\n  name: dsh-http-proxy\n  disabled: true\n  config:\n    proxy: custom-setting\n');
+ const r=run(home,['--repair-required','--dry-run']);assert.equal(r.status,0,r.stderr);
+ const pkg=JSON.parse(await fs.readFile(path.join(profile,'package.json'),'utf8'));assert.equal(pkg.dependencies['user-plugin'],'2.3.4');assert.equal(pkg.dependencies['dsh-dream-skin'],'10.0.0');assert.ok(pkg.dsh.profile.bundles.includes('user-plugin'));assert.equal(pkg.dsh.profile.bundles.includes('dsh-dream-skin'),false);
+ const config=await fs.readFile(path.join(profile,'cordis.patch.yml'),'utf8');assert.match(config,/preserve-me/);assert.match(config,/custom-setting/);assert.equal(config.includes('disabled: true'),false);
+});

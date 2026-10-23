@@ -19,7 +19,7 @@
 param(
     [string]$Version = '0.1.0',
     [string]$NodeVersion = 'v24.19.0',
-    [string]$DshVersion = '0.2.0-rc.2',
+    [string]$DshVersion = 'latest',
     [string]$Registry = 'https://registry.npmjs.org/',
     [string]$NodeMirror = 'https://nodejs.org/dist/',
     [string]$OutDir = '',
@@ -103,8 +103,8 @@ if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') {
 if ($NodeVersion -notmatch '^v\d+\.\d+\.\d+$') {
     Fail 'NodeVersion must look like v24.19.0.'
 }
-if ($DshVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-    Fail 'DshVersion must be an exact version, e.g. 0.2.0-rc.2.'
+if ($DshVersion -ne 'latest' -and $DshVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    Fail 'DshVersion must be latest or an exact version, e.g. 0.2.1-rc.2.'
 }
 if ($Registry -notmatch '^https://') { Fail 'Registry must be an HTTPS URL.' }
 if ($NodeMirror -notmatch '^https://') { Fail 'NodeMirror must be an HTTPS URL.' }
@@ -178,6 +178,12 @@ try {
     }
     Write-Ok 'Shell compiled with product metadata'
 
+    if ($DshVersion -eq 'latest') {
+        Write-Step 'Resolving the latest recommended DSH version'
+        $latest = Invoke-RestMethod -Uri ($Registry.TrimEnd('/') + '/@deepseek-ai%2fdsh/latest')
+        $DshVersion = [string]$latest.version
+        if ($DshVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { Fail 'Invalid DSH latest version from registry.' }
+    }
     Write-Step "Installing @deepseek-ai/dsh@$DshVersion"
     $packageJson = @{
         name = 'dsh-portable-runtime'
@@ -266,7 +272,7 @@ try {
     Write-Step 'Writing launcher and documentation'
     foreach ($script in @('update-worker.cjs', 'environment-store.cjs',
         'switch-transaction.cjs', 'plugin-resolver.cjs', 'environment-cleanup.cjs',
-        'install-plugins.cjs', 'plugin-catalog.cjs', 'portable-plugin-adapters.cjs', 'repair-http-proxy.cjs', 'cache-cleanup.cjs', 'version-transition.cjs')) {
+        'first-run.cjs', 'install-plugins.cjs', 'plugin-catalog.cjs', 'portable-plugin-adapters.cjs', 'repair-http-proxy.cjs', 'cache-cleanup.cjs', 'version-transition.cjs')) {
         Copy-Item -LiteralPath (Join-Path $repo "desktop\$script") -Destination (Join-Path $payload 'desktop') -Force
     }
     # Exercise the real worker from the staged package, without network or user data.
@@ -305,7 +311,7 @@ $webviewNote
 4. 首次启动会检查环境；Git/pnpm 缺失时可自动补全。也可手动运行：
    DeepSeek Harness.exe --verify-environment
    DeepSeek Harness.exe --repair-environment
-5. 环境检查通过后会选择推荐插件：选择安装时插件市场/HTTP 代理/网络配置为必需，其余按主题、辅助、布局、功能分组勾选；选择“暂不安装”则跳过全部插件。直连不可用时自动使用镜像。
+5. 环境检查通过后会选择推荐插件：插件市场/HTTP 代理/网络配置为必需，必须安装完成才能进入软件；其余按需勾选，或选择“仅安装必需组件”。直连不可用时自动使用镜像。
 
 【数据】
 配置、会话、日志、环境体检结果和 WebView2 数据都在本目录 data 下；删除整个文件夹即完成卸载。
@@ -334,6 +340,11 @@ $webviewNote
     $smokeHome = Join-Path $stage 'installer-smoke'
     $installerOutput = & $nodeExe (Join-Path $payload 'desktop\install-plugins.cjs') --root $payload --home $smokeHome --dry-run 2>&1
     if ($LASTEXITCODE -ne 0) { Fail "Packaged plugin installer failed: $installerOutput" }
+    $requiredOutput = & $nodeExe (Join-Path $payload 'desktop\update-worker.cjs') required-status 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "Packaged required-plugin gate failed: $requiredOutput" }
+    $requiredState = $requiredOutput | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains 'result' } | Select-Object -Last 1
+    if ($null -eq $requiredState -or $requiredState.result.ready -ne $false) { Fail 'New package must require first-run component installation.' }
+
 
     if ($ReleaseNotesFile) {
         Copy-Item -LiteralPath $ReleaseNotesFile -Destination (Join-Path $payload 'CHANGELOG.md')

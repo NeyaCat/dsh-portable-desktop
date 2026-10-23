@@ -10,7 +10,9 @@ const { spawn } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..');
 const semver = require(path.join(ROOT, 'node/node_modules/npm/node_modules/semver'));
 const STORE = path.join(ROOT, 'versions');
-const REGISTRY = 'https://registry.npmjs.org';
+const configFile=process.env.npm_config_userconfig;
+const configuredRegistry=configFile&&fs.existsSync(configFile)?fs.readFileSync(configFile,'utf8').match(/^\s*registry\s*=\s*(\S+)/m)?.[1]:null;
+const REGISTRY = (process.env.npm_config_registry || configuredRegistry || 'https://registry.npmjs.org').replace(/\/+$/,'');
 const PKG = '@deepseek-ai/dsh';
 const environments = require('./environment-store.cjs');
 const transactions = require('./switch-transaction.cjs');
@@ -288,8 +290,8 @@ async function install(version, stageOnly = false) {
 
 async function main() {
   const progress = message => emit({ progress: message });
-  const initialize = async () => environments.bootstrap(ROOT, resolveRuntime());
-  const exclusive = async fn => {
+  const initialize = async initial => environments.bootstrap(ROOT, initial || resolveRuntime());
+  const exclusive = async (fn, initial) => {
     let lock;
     for(let attempt=0;;attempt++) {
       try { lock=await acquireLock();break; }
@@ -298,7 +300,7 @@ async function main() {
         await new Promise(resolve=>setTimeout(resolve,150));
       }
     }
-    try { await initialize();return await fn(); } finally { lock.close(); }
+    try { await initialize(initial);return await fn(); } finally { lock.close(); }
   };
   switch (process.argv[2]) {
     case 'catalog': {
@@ -307,8 +309,13 @@ async function main() {
       return { ...data, selected, updateAvailable: !!data.recommended && !!semver.valid(running) && semver.gt(data.recommended, running) };
     }
     case 'resolve': return environments.resolve(ROOT, true) || resolveRuntime();
+    case 'required-status': {
+      const active=environments.resolve(ROOT) || {...resolveRuntime(),home:path.join(ROOT,'data')};
+      return require('./first-run.cjs').requiredState(ROOT,active.home,active);
+    }
     case 'boot': {
       const state=environments.readState(ROOT);
+      const initial=state?null:await require('./first-run.cjs').initialRuntime(ROOT,resolveRuntime(),{catalogue:fetchCatalogue,install},progress);
       // A long download must not prevent launching the already healthy environment.
       if(state && !state.pending && !state.trial) {
         const active=environments.resolve(ROOT);
@@ -318,7 +325,7 @@ async function main() {
       const active=await transactions.activate(ROOT,progress);
       await require('./plugin-resolver.cjs').relocateInstaller(active.home);
       return active;
-      });
+      },initial);
     }
     case 'environments': return exclusive(() => transactions.list(ROOT));
     case 'prepare': return exclusive(() => transactions.prepare(ROOT, process.argv[3], progress,process.argv[4]==='fresh'));

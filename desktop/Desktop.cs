@@ -627,8 +627,13 @@ internal sealed class DesktopWindow : Form
         if(closing || uiReady || repairingStartup || startupRepairCount >= 3) return false;
         var known=DefaultPlugins.Catalog(Program.Root);
         var names=new List<string>();
-        foreach(string name in requested)
+        foreach(string name in requested) {
+            if(known.Exists(p=>p.Name==name && p.Required)) {
+                environmentFailed=true; StopBackend();
+                throw new Exception("必需组件 "+name+" 启动失败，无法进入 DSH。请检查日志并重新安装该组件。");
+            }
             if(!suspendedStartupPlugins.Contains(name) && known.Exists(p=>p.Name==name)) names.Add(name);
+        }
         if(names.Count==0) return false;
         repairingStartup=true;startupRepairCount++;
         try {
@@ -1009,69 +1014,46 @@ internal sealed class DesktopWindow : Form
         catch (Exception error) { UpdateToast("error", "无法打开版本管理：" + error.Message); }
     }
 
-    // First run: show the recommended-plugin picker. Required plugins are
-    // locked; optional plugins start checked and can be deselected. A failed
-    // attempt is retried on the next launch.
+    // Required components gate entry into DSH. Optional plugins remain selectable.
     private async Task EnsureRecommendedPluginsAsync(string home)
     {
+        if (!DefaultPlugins.Available(Program.Root)) throw new Exception("必需插件安装文件缺失，请重新解压便携包。");
+        var required = await Updates.Run("required-status");
+        if (required.ContainsKey("ready") && (bool)required["ready"]) return;
+        bool repairExisting = File.Exists(Path.Combine(home,"profiles","web","package.json"));
+        List<RecommendedPlugin> catalog = DefaultPlugins.Catalog(Program.Root);
+        if (catalog.Count == 0) throw new Exception("必需插件清单为空，无法完成首次安装。");
+        List<string> selected = new List<string>();
+        if (repairExisting)
+        {
+            foreach(var plugin in catalog) if(plugin.Required) selected.Add(plugin.Name);
+        }
+        else using (var picker = new PluginPicker(catalog))
+        {
+            if (picker.ShowDialog(this) != DialogResult.OK) throw new Exception("必需组件尚未安装，无法进入 DSH。");
+            selected = picker.SelectedNames;
+        }
+        DesktopPreferences.SaveRecommendedPlugins("failed");
+        ShowLoading(repairExisting ? "正在补齐必需组件，保留已有插件与配置…" : "正在安装所选插件…");
+        status.BeginInstall();
+        bool ok;
         try
         {
-            if (!DefaultPlugins.Available(Program.Root)) return;
-            string profile = Path.Combine(home, "profiles", "web");
-            string decision = DesktopPreferences.RecommendedPlugins;
-            if (decision == "installed" || decision == "declined") return;
-            // An existing profile belongs to the user; never replace it.
-            if (decision == "" && File.Exists(Path.Combine(profile, "package.json"))) return;
-            List<RecommendedPlugin> catalog = DefaultPlugins.Catalog(Program.Root);
-            if (catalog.Count == 0)
-            {
-                Log("Recommended plugins: catalog is empty or unreadable");
-                return;
-            }
-            List<string> selected;
-            using (var picker = new PluginPicker(catalog))
-            {
-                if (picker.ShowDialog(this) != DialogResult.OK)
-                {
-                    DesktopPreferences.SaveRecommendedPlugins("declined");
-                    Log("Recommended plugins: declined");
-                    return;
-                }
-                selected = picker.SelectedNames;
-            }
-            long free = RuntimeEnvironment.FreeDiskBytes();
-            if (free > 0 && free < 3L * 1024 * 1024 * 1024)
-                MessageBox.Show(this, "当前磁盘剩余空间不足 3 GB。\r\n首次安装插件可能失败，建议先清理磁盘或只保留必需组件。",
-                    "DSH 首次启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            DesktopPreferences.SaveRecommendedPlugins("failed");
-            Log("Recommended plugins: selected " + selected.Count + " plugin(s)");
-            ShowLoading("正在安装所选插件（必需组件优先，首次约下载 200 MB）…");
-            status.BeginInstall();
-            bool ok = await Task.Run(delegate { return DefaultPlugins.Install(Program.Root, home, proxyBridge, Log, selected, row => {
+            ok = await Task.Run(delegate { return DefaultPlugins.Install(Program.Root, home, proxyBridge, Log, selected, row => {
                 if(closing) return;
                 try { BeginInvoke((Action)(() => { if(!closing) status.ReportInstall(row); })); } catch(InvalidOperationException) {}
-            }, runtimeRoot); });
-            status.EndInstall();
-            if(closing) return;
-            if (proxyBridge != null) Log("ProxyBridge: npmrc " + proxyBridge.SyncNow());
-            if (ok)
-            {
-                DesktopPreferences.SaveRecommendedPlugins("installed");
-                Log("Recommended plugins: installed");
-            }
-            else
-            {
-                Log("Recommended plugins: failed");
-                MessageBox.Show(this, "插件安装未完成。必需组件会优先重试；请检查网络后重启，或稍后在插件市场中安装其余插件。",
-                    "DSH 首次启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            ShowLoading("正在初始化窗口组件…");
+            }, runtimeRoot, repairExisting); });
         }
-        catch (Exception error)
-        {
-            status.EndInstall();
-            Log("Recommended plugins failed: " + error.Message);
-        }
+        finally { status.EndInstall(); }
+        if(closing) return;
+        if(proxyBridge!=null) Log("ProxyBridge: npmrc "+proxyBridge.SyncNow());
+        required=await Updates.Run("required-status");
+        if(!required.ContainsKey("ready") || !(bool)required["ready"])
+            throw new Exception("必需组件安装未完成，无法进入 DSH。请检查网络后重新启动以重试，详情见 data/desktop.log。");
+        DesktopPreferences.SaveRecommendedPlugins("installed");
+        Log("Recommended plugins: required components verified");
+        if(!ok) MessageBox.Show(this,"必需组件已完成；部分可选插件安装失败，可稍后在插件市场重试。","DSH 首次启动",MessageBoxButtons.OK,MessageBoxIcon.Information);
+        ShowLoading("正在初始化窗口组件…");
     }
 
     private async Task StartAsync()
@@ -1104,6 +1086,8 @@ internal sealed class DesktopWindow : Form
             await EnsureRecommendedPluginsAsync(environmentHome);
             if(closing) return;
             await Task.Run(() => DefaultPlugins.ValidateInstalled(Program.Root, environmentHome, runtimeRoot, Log));
+            var mandatory = await Updates.Run("required-status");
+            if(!mandatory.ContainsKey("ready") || !(bool)mandatory["ready"]) throw new Exception("必需组件未通过启动检查，无法进入 DSH。");
             environmentTrial=runtime.ContainsKey("trial") && (bool)runtime["trial"];
             if(runtime.ContainsKey("expectedPlugins")) expectedPlugins=runtime["expectedPlugins"];
             if(runtime.ContainsKey("plugins")) environmentPlugins=runtime["plugins"];

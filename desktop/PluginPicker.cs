@@ -26,7 +26,7 @@ internal sealed class PluginPicker : Form
     private readonly Panel content = new Panel();
     private readonly ExitActionButton selectAll = new ExitActionButton();
     private readonly ExitActionButton selectNone = new ExitActionButton();
-    private readonly ExitActionButton cancel = new ExitActionButton();
+    private readonly ExitActionButton onlyRequired = new ExitActionButton();
     private readonly ExitActionButton install = new ExitActionButton();
 
     internal PluginPicker(List<RecommendedPlugin> plugins)
@@ -49,6 +49,7 @@ internal sealed class PluginPicker : Form
         ShowInTaskbar = false;
         MinimizeBox = false;
         MaximizeBox = false;
+        ControlBox = false;
         ClientSize = new Size(620, 690);
         MinimumSize = new Size(560, 560);
         AutoScaleDimensions = new SizeF(96F, 96F);
@@ -59,7 +60,7 @@ internal sealed class PluginPicker : Form
         ForeColor = text;
 
         heading.Text = "选择推荐插件";
-        subtitle.Text = "按需选择插件，必需组件会自动包含。也可以稍后在插件市场安装。";
+        subtitle.Text = "首次使用必须安装 3 个基础组件；其他插件可按需选择。";
         summary.Text = "";
 
         scroll.AutoScroll = false;
@@ -71,12 +72,12 @@ internal sealed class PluginPicker : Form
 
         selectAll.Text = "全选";
         selectNone.Text = "全不选";
-        cancel.Text = "暂不安装";
+        onlyRequired.Text = "仅安装必需组件";
         install.Text = "安装所选";
-        cancel.DialogResult = DialogResult.Cancel;
+        onlyRequired.DialogResult = DialogResult.OK;
+        onlyRequired.Click += delegate { SetOptional(false); };
         install.DialogResult = DialogResult.OK;
         AcceptButton = install;
-        CancelButton = cancel;
         selectAll.Click += delegate { SetOptional(true); };
         selectNone.Click += delegate { SetOptional(false); };
 
@@ -86,7 +87,7 @@ internal sealed class PluginPicker : Form
         Controls.Add(summary);
         Controls.Add(selectAll);
         Controls.Add(selectNone);
-        Controls.Add(cancel);
+        Controls.Add(onlyRequired);
         Controls.Add(install);
 
         BuildContent();
@@ -94,7 +95,7 @@ internal sealed class PluginPicker : Form
         UpdateSummary();
         ApplyButtonSkin(selectAll, false);
         ApplyButtonSkin(selectNone, false);
-        ApplyButtonSkin(cancel, false);
+        ApplyButtonSkin(onlyRequired, false);
         ApplyButtonSkin(install, true);
         LayoutChrome();
     }
@@ -292,7 +293,7 @@ internal sealed class PluginPicker : Form
         scroll.SetBounds(margin, 103, ClientSize.Width - margin * 2, Math.Max(120, ClientSize.Height - 223));
         int y = ClientSize.Height - 58;
         install.SetBounds(ClientSize.Width - margin - 112, y, 112, 34);
-        cancel.SetBounds(install.Left - 10 - 96, y, 96, 34);
+        onlyRequired.SetBounds(install.Left - 10 - 132, y, 132, 34);
         int selectionY = ClientSize.Height - 103;
         selectNone.SetBounds(ClientSize.Width - margin - 66, selectionY, 66, 28);
         selectAll.SetBounds(selectNone.Left - 6 - 54, selectionY, 54, 28);
@@ -348,6 +349,18 @@ internal sealed class PluginPicker : Form
         Font font = SkinTheme.CreateFont(skin, points, style);
         control.Font = font;
         fonts.Add(font);
+    }
+
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if((keyData & Keys.KeyCode)==Keys.Escape) return true;
+        return base.ProcessDialogKey(keyData);
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        if(e.CloseReason==CloseReason.UserClosing && DialogResult!=DialogResult.OK) e.Cancel=true;
     }
 
     protected override void OnHandleCreated(EventArgs e)

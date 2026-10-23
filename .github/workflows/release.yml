@@ -5,11 +5,11 @@ on:
       version:
         description: Release version without v
         required: true
-        default: '0.1.2'
+        default: '0.2.0'
       dsh_version:
         description: DSH version
         required: true
-        default: '0.2.0-rc.2'
+        default: 'latest'
       node_version:
         description: Node version
         required: true
@@ -32,7 +32,7 @@ jobs:
           INPUT_NODE: ${{ inputs.node_version }}
         run: |
           $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:GITHUB_REF_NAME -replace '^v', '' }
-          $dsh = if ($env:INPUT_DSH) { $env:INPUT_DSH } else { '0.2.0-rc.2' }
+          $dsh = if ($env:INPUT_DSH) { $env:INPUT_DSH } else { 'latest' }
           $node = if ($env:INPUT_NODE) { $env:INPUT_NODE } else { 'v24.19.0' }
           "version=$version" >> $env:GITHUB_OUTPUT
           "dsh=$dsh" >> $env:GITHUB_OUTPUT

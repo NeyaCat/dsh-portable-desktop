@@ -149,7 +149,11 @@ for (const name of requiredNames) requested.add(name);
 for (const name of requiredNames) if (!allNames.has(name)) fail('required plugin is missing from the manifest: ' + name);
 
 let selected = allPlugins.filter(plugin => requested.has(plugin.name));
-const basePackage = readJson(path.join(defaults, 'package.json'), 'default profile package.json');
+const repairRequired=flag('--repair-required');
+if(repairRequired) selected=required;
+const existingPackage=repairRequired && fs.existsSync(path.join(profile,'package.json')) ? readJson(path.join(profile,'package.json'),'existing profile') : null;
+const existingLock=existingPackage && fs.existsSync(path.join(profile,'pnpm-lock.yaml')) ? fs.readFileSync(path.join(profile,'pnpm-lock.yaml'),'utf8') : null;
+const basePackage = existingPackage || readJson(path.join(defaults, 'package.json'), 'default profile package.json');
 const baseLock = fs.readFileSync(path.join(defaults, 'pnpm-lock.yaml'), 'utf8');
 const baseConfig = fs.readFileSync(path.join(defaults, 'cordis.patch.yml'), 'utf8');
 const mirrors = Object.assign({ npm: 'https://registry.npmmirror.com/', github: 'https://gh-proxy.com/' }, manifest.mirrors || {});
@@ -188,7 +192,7 @@ if (mirrorRequested) {
   }
 }
 const directLock = baseLock.replace(/https:\/\/registry\.npmmirror\.com\//g, 'https://registry.npmjs.org/');
-const lockText = mirrorRequested ? rewriteLock(baseLock, mirrors) : directLock;
+const lockText = existingLock || (mirrorRequested ? rewriteLock(baseLock, mirrors) : directLock);
 const configSeed = fs.existsSync(path.join(profile, 'cordis.patch.yml')) ? fs.readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8') : baseConfig;
 const runtimeRoot=path.resolve(argument('--runtime-root',root));
 const target={root:runtimeRoot,version:readJson(path.join(runtimeRoot,'node_modules/@deepseek-ai/dsh/package.json'),'runtime').version};
@@ -199,18 +203,25 @@ const skippedNames=new Set();
 function writeProfile(selection) {
   copyTree(defaults, profile);
   const pkg = JSON.parse(JSON.stringify(basePackage));
-  pkg.dependencies = {};
+  pkg.dependencies = existingPackage ? {...existingPackage.dependencies} : {};
   for (const plugin of selection) pkg.dependencies[plugin.name] = specs[plugin.name] || plugin.spec;
   const chosen = new Set(selection.map(plugin => plugin.name));
   const bundles = Array.isArray(pkg.dsh && pkg.dsh.profile && pkg.dsh.profile.bundles)
     ? pkg.dsh.profile.bundles
     : [];
-  const filtered = bundles.filter(name => !allNames.has(name) || chosen.has(name));
+  const filtered = bundles.filter(name => existingPackage || !allNames.has(name) || chosen.has(name));
   for (const plugin of selection) if (filtered.indexOf(plugin.name) < 0) filtered.push(plugin.name);
-  if (pkg.dsh && pkg.dsh.profile) pkg.dsh.profile.bundles = filtered;
+  pkg.dsh ??={}; pkg.dsh.profile ??={}; pkg.dsh.profile.bundles = filtered;
   fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify(pkg, null, 2) + '\n', 'utf8');
   fs.writeFileSync(path.join(profile, 'pnpm-lock.yaml'), lockText, 'utf8');
-  let config=filterConfig(configSeed,new Set([...chosen,...skippedNames]),allNames);
+  let config=existingPackage ? configSeed : filterConfig(configSeed,new Set([...chosen,...skippedNames]),allNames);
+  if(repairRequired) {
+    const yaml=require(path.join(root,'node_modules/yaml')),doc=yaml.parseDocument(config);
+    if(doc.errors.length)throw Error('Invalid plugin configuration; original retained');
+    if(yaml.isSeq(doc.contents))for(const row of doc.contents.items)
+      if(yaml.isMap(row)&&requiredNames.has(row.get('name')))row.delete('disabled');
+    config=doc.toString();
+  }
   config=catalog.preserveSkippedConfig(config,skippedNames);
   fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), config, 'utf8');
 }

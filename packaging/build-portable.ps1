@@ -255,8 +255,20 @@ try {
     }
 
     Write-Step 'Writing launcher and documentation'
-    Copy-Item -LiteralPath (Join-Path $repo 'desktop\update-worker.cjs') -Destination (Join-Path $payload 'desktop') -Force
-    Copy-Item -LiteralPath (Join-Path $repo 'desktop\install-plugins.cjs') -Destination (Join-Path $payload 'desktop') -Force
+    foreach ($script in @('update-worker.cjs', 'environment-store.cjs',
+        'switch-transaction.cjs', 'plugin-resolver.cjs', 'environment-cleanup.cjs',
+        'install-plugins.cjs', 'repair-http-proxy.cjs')) {
+        Copy-Item -LiteralPath (Join-Path $repo "desktop\$script") -Destination (Join-Path $payload 'desktop') -Force
+    }
+    # Exercise the real worker from the staged package, without network or user data.
+    # Missing transitive modules must fail the build rather than the user's first launch.
+    $workerOutput = & $nodeExe (Join-Path $payload 'desktop\update-worker.cjs') resolve 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "Packaged version worker failed: $workerOutput" }
+    $workerResult = $workerOutput | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.PSObject.Properties.Name -contains 'result' } | Select-Object -Last 1
+    if ($null -eq $workerResult -or $workerResult.result.version -ne $DshVersion) {
+        Fail "Packaged version worker returned an unexpected runtime: $workerOutput"
+    }
     $launcher = "@echo off`r`nstart `"`" `"%~dp0DeepSeek Harness.exe`"`r`n"
     [System.IO.File]::WriteAllText(
         (Join-Path $payload 'Run-DSH.cmd'),

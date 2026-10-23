@@ -83,8 +83,9 @@ internal static class Updates
                     if (row.ContainsKey("error")) failure = Value(row, "error");
                 }
                 process.WaitForExit();
+                string diagnostic = stderr.GetAwaiter().GetResult().Trim();
                 if (process.ExitCode != 0 || result == null)
-                    throw new Exception(failure ?? "版本服务未完成，请检查网络或 versions/install.log。");
+                    throw new Exception(failure ?? (diagnostic.Length > 0 ? diagnostic.Substring(0, Math.Min(diagnostic.Length, 2000)) : "Version worker returned no result (exit " + process.ExitCode + ")."));
                 return result;
             }
         });

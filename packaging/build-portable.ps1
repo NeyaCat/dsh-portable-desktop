@@ -24,12 +24,16 @@ param(
     [string]$NodeMirror = 'https://nodejs.org/dist/',
     [string]$OutDir = '',
     [string]$WebView2Version = 'latest',
+    [ValidateSet('standard', 'full')]
+    [string]$Flavor = 'standard',
+    [string]$ReleaseNotesFile = '',
     [switch]$BundleWebView2,
     [switch]$SkipZip
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 function Write-Step([string]$Message) {
     Write-Host "`n==> $Message" -ForegroundColor Cyan
@@ -79,6 +83,12 @@ function Invoke-Npm([string]$NpmCmd, [string]$WorkingDirectory, [string[]]$NpmAr
     }
 }
 
+if ($BundleWebView2) { $Flavor = 'full' }
+$BundleWebView2 = $Flavor -eq 'full'
+if ($ReleaseNotesFile) {
+    $ReleaseNotesFile = [IO.Path]::GetFullPath($ReleaseNotesFile)
+    if (-not (Test-Path -LiteralPath $ReleaseNotesFile -PathType Leaf)) { Fail "Release notes file not found: $ReleaseNotesFile" }
+}
 $repo = Split-Path $PSScriptRoot -Parent
 if (-not (Test-Path -LiteralPath (Join-Path $repo 'desktop\Build.ps1'))) {
     Fail "Run this script from a full checkout of the repository (missing desktop\Build.ps1)."
@@ -100,11 +110,11 @@ if ($Registry -notmatch '^https://') { Fail 'Registry must be an HTTPS URL.' }
 if ($NodeMirror -notmatch '^https://') { Fail 'NodeMirror must be an HTTPS URL.' }
 
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
-    $OutDir = Join-Path $repo 'out\DSH-Portable'
+    $OutDir = Join-Path $repo ("out\DSH-Portable-$Version-$Flavor")
 }
 $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 $outParent = Split-Path -Parent $OutDir
-$zipPath = Join-Path $outParent ("DSH-Portable-$Version-win-x64.zip")
+$zipPath = Join-Path $outParent ("DSH-Portable-$Version-$Flavor-win-x64.zip")
 
 # Never overwrite a previous package: it may contain user data.
 if (Test-Path -LiteralPath $OutDir) {
@@ -320,6 +330,13 @@ $webviewNote
     if (Test-Path -LiteralPath $defaults) {
         Copy-Item -LiteralPath $defaults -Destination (Join-Path $payload 'defaults') -Recurse -Force
     }
+
+    if ($ReleaseNotesFile) {
+        Copy-Item -LiteralPath $ReleaseNotesFile -Destination (Join-Path $payload 'CHANGELOG.md')
+    }
+    @{ version = $Version; flavor = $Flavor; dsh = $DshVersion; node = $NodeVersion;
+        webview2 = $webviewVersion; builtAt = [DateTime]::UtcNow.ToString('o') } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $payload 'build-info.json') -Encoding UTF8
 
     Write-Step 'Publishing the package'
     Move-Item -LiteralPath $payload -Destination $OutDir

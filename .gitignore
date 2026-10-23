@@ -61,3 +61,6 @@
 /desktop/plugin-tools/*
 !/desktop/plugin-tools/package.json
 !/desktop/plugin-tools/package-lock.json
+
+# Hand-written public release notes
+!/release-notes/

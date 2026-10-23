@@ -105,3 +105,19 @@ powershell -ExecutionPolicy Bypass -File .\desktop\Test-Desktop.ps1       # 窗�
 ## 📜 许可证
 
 MIT —— 见 [LICENSE](LICENSE)。随包分发的第三方组件各自保留其许可。
+
+### 标准版、完整版与手写更新日志
+
+默认构建标准版（使用系统 WebView2，缺失时首次启动可安装）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build-portable.ps1 -Version 0.1.2 -Flavor standard -ReleaseNotesFile .\release-notes\0.1.2.md
+```
+
+完整版使用 `-Flavor full`，内置 WebView2。原有 `-BundleWebView2` 参数仍兼容。
+输出文件名分别包含 `standard` 或 `full`，两种包可以并存。包内包含 `CHANGELOG.md`（指定日志时）和 `build-info.json`。
+每次构建使用新目录；已有输出不会覆盖。
+
+GitHub Actions 会构建两个版本。将手写 Markdown 日志保存为 `release-notes/版本号.md`，
+与该版本代码一起提交后推送对应 `v版本号` 标签。该文件将作为 Release 正文并放入两个包；未提供时自动生成提交日志。
+本地便携发布工具独立存放于 Git 忽略目录，不随仓库发布。

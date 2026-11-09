@@ -1,6 +1,4 @@
 'use strict';
-// This process is deliberately outside the window's backend job. An accepted
-// installation may finish after the UI exits; it never writes to a running tree.
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
@@ -19,7 +17,7 @@ const transactions = require('./switch-transaction.cjs');
 const manifestPath = dir => path.join(dir, 'node_modules', PKG, 'package.json');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const emit = data => { if (!process.stdout.destroyed) process.stdout.write(JSON.stringify(data) + '\n'); };
-process.stdout.on('error', () => {}); // UI can close while installation continues.
+process.stdout.on('error', () => {});
 
 function catalogue(metadata) {
   const recommended = metadata['dist-tags']?.latest;
@@ -35,6 +33,17 @@ function catalogue(metadata) {
   return { versions, recommended: versions.some(v => v.version === recommended) ? recommended : null };
 }
 
+function shellRelease(current, release) {
+  const version = semver.valid(release.tag_name);
+  if (!version || release.draft || release.prerelease) throw Error('发布版本信息无效');
+  const name = 'DSH-Desktop-Shell-' + version + '-win-x64.zip';
+  const asset = release.assets.find(a => a.name === name && a.state === 'uploaded');
+  const url = 'https://github.com/NeyaCat/dsh-portable-desktop/releases/download/' + release.tag_name + '/' + name;
+  return { version, newer: semver.gt(version,current),
+    url: asset?.browser_download_url === url && /^sha256:[a-f0-9]{64}$/i.test(asset.digest) ? url : '',
+    digest: asset?.digest || '' };
+}
+
 async function fetchCatalogue() {
   let response;
   try { response = await fetch(`${REGISTRY}/@deepseek-ai%2fdsh`, {
@@ -43,7 +52,7 @@ async function fetchCatalogue() {
     if (!response.ok) throw new Error(`官方版本源返回 HTTP ${response.status}`);
   } catch { response=await fetch('https://registry.npmmirror.com/@deepseek-ai%2fdsh',{signal:AbortSignal.timeout(25000),headers:{Accept:'application/json'}}); }
   if(!response.ok)throw new Error('版本源与镜像均不可用');
-  return catalogue(await response.json());
+  return catalogue(await require('./download-progress.cjs').readMetadata(response, 'DSH 版本目录'));
 }
 
 async function atomicJson(file, value) {
@@ -95,7 +104,9 @@ async function acquireLock(root = ROOT) {
 
 function run(args, cwd, env, log, timeout = 20 * 60 * 1000) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const options = { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] };
+    const child = path.basename(args[0]) === 'npm-cli.js'
+      ? require('./download-progress.cjs').spawnInstaller(args, options) : spawn(process.execPath, args, options);
     let output = '';
     const receive = data => { output = (output + data.toString()).slice(-128000); log?.write(data); };
     child.stdout.on('data', receive); child.stderr.on('data', receive);
@@ -236,7 +247,7 @@ async function install(version, stageOnly = false) {
       // Recover only a previous fully validated staging tree. Revalidate it
       // before publication; partial npm installs are not candidates for reuse.
       let id, staging;
-      for (const item of await fsp.readdir(STORE, { withFileTypes: true })) {
+      for (const item of process.env.DSH_SWITCH_CACHE ? [] : await fsp.readdir(STORE, { withFileTypes: true })) {
         const match = /^\.staging-([0-9a-f-]{36})$/.exec(item.name);
         if (!item.isDirectory() || !match) continue;
         const candidate = path.join(STORE, item.name);
@@ -253,14 +264,14 @@ async function install(version, stageOnly = false) {
       if (staging) {
         await status('validating', `复用已下载的 ${version}，重新验证后完成切换…`);
       } else {
-        id = crypto.randomUUID(); staging = path.join(STORE, '.staging-' + id);
+        id = crypto.randomUUID(); staging = path.join(process.env.DSH_SWITCH_CACHE || STORE, '.staging-' + id);
         await fsp.mkdir(staging);
         await atomicJson(path.join(staging, 'package.json'), {
           private: true, name: 'dsh-portable-version', version: '1.0.0', dependencies: { [PKG]: version }
         });
         await status('installing', `正在后台下载并安装 ${version}，当前版本不受影响…`);
         const env = { ...process.env, PATH: path.join(ROOT, 'node') + path.delimiter + process.env.PATH,
-          npm_config_cache: path.join(STORE, '.npm-cache'), npm_config_registry: REGISTRY,
+          npm_config_cache: path.join(process.env.DSH_SWITCH_CACHE || STORE, '.npm-cache'), npm_config_registry: REGISTRY,
           DSH_HOME: path.join(staging, '.validation-home'), NO_COLOR: '1' };
         await run([path.join(ROOT, 'node/node_modules/npm/bin/npm-cli.js'), 'install', '--omit=dev',
           '--no-audit', '--no-fund', '--package-lock=true', '--registry=' + REGISTRY], staging, env, log);
@@ -270,7 +281,7 @@ async function install(version, stageOnly = false) {
       directory = version + '-' + id;
       await atomicJson(path.join(staging, 'ready.json'), { version, integrity: entry.integrity, validatedAt: new Date().toISOString() });
       const destination = path.resolve(STORE, directory);
-      if (path.dirname(path.resolve(staging)) !== STORE || path.dirname(destination) !== STORE)
+      if (![STORE, process.env.DSH_SWITCH_CACHE].includes(path.dirname(path.resolve(staging))) || path.dirname(destination) !== STORE)
         throw new Error('安装目录不在便携版本目录内，已停止切换。');
       await promoteDirectory(staging, destination, {
         onBusy: () => status('finalizing', '验证已通过，正在等待 Windows 释放安装目录，完成后自动切换…')
@@ -303,6 +314,16 @@ async function main() {
     try { await initialize(initial);return await fn(); } finally { lock.close(); }
   };
   switch (process.argv[2]) {
+    case 'shell-release': {
+      const current = process.argv[3];
+      if (!semver.valid(current)) throw Error('无法识别当前桌面软件版本');
+      const response = await fetch('https://api.github.com/repos/NeyaCat/dsh-portable-desktop/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'DSH-Portable-Desktop' },
+        signal: AbortSignal.timeout(25000)
+      });
+      if (!response.ok) throw Error('GitHub Releases 返回 HTTP ' + response.status);
+      return shellRelease(current, await response.json());
+    }
     case 'catalog': {
       const data = await fetchCatalogue(), selected = environments.resolve(ROOT, true) || resolveRuntime();
       const running = process.argv[3] || selected.version;
@@ -348,5 +369,14 @@ async function main() {
     default: throw new Error('Unknown updater command');
   }
 }
-module.exports = { catalogue, atomicJson, resolveRuntime, acquireLock, smokeRuntime, promoteDirectory, observeClose, stopValidation };
-if (require.main === module) main().then(result => emit({ result })).catch(error => { emit({ error: error.message }); process.exitCode = 1; });
+module.exports = { shellRelease, catalogue, atomicJson, resolveRuntime, acquireLock, smokeRuntime, promoteDirectory, observeClose, stopValidation };
+async function start() {
+  if (process.env.DSH_SWITCH_CACHE) {
+    // The window releases this gate only after assigning the worker to its job.
+    let signal = '';
+    for await (const chunk of process.stdin) signal += chunk;
+    if (signal.trim() !== 'start') throw Error('版本管理窗口已关闭');
+  }
+  return main();
+}
+if (require.main === module) start().then(result => emit({ result })).catch(error => { emit({ error: error.message }); process.exitCode = 1; });

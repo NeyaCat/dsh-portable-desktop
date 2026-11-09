@@ -16,8 +16,11 @@ internal static class VersionSwitch
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        if (!EnvironmentCheck.EnsureReady()) return;
-        Application.Run(new VersionWindow());
+        using (var lease = ShellMaintenance.Enter(AppDomain.CurrentDomain.BaseDirectory)) {
+            if (lease == null) return;
+            if (!EnvironmentCheck.EnsureReady()) return;
+            using (var window = new VersionWindow()) Application.Run(window);
+        }
     }
 }
 
@@ -51,6 +54,66 @@ internal sealed class VersionWindow : Form
         base.WndProc(ref message);
     }
 
+    private readonly string cache = Path.Combine(Updates.Root, "versions", ".switch-" + Guid.NewGuid().ToString("N"));
+    private readonly object workerLock = new object();
+    private IntPtr workerJob;
+    private System.Diagnostics.Process browser;
+    private bool closing;
+    private Task initializing;
+
+    private void StartWorker(System.Diagnostics.Process process)
+    {
+        lock (workerLock) {
+            if (closing) throw new OperationCanceledException();
+            process.Start();
+            if (!Native.AssignProcessToJobObject(workerJob, process.Handle)) {
+                var error = new System.ComponentModel.Win32Exception();
+                process.Kill();
+                throw error;
+            }
+            process.StandardInput.WriteLine("start");
+            process.StandardInput.Close();
+        }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!closing) {
+            lock (workerLock) {
+                closing = true;
+                Native.TerminateJobObject(workerJob, 1);
+                Native.CloseHandle(workerJob);
+            }
+            timer.Stop();
+            if (initializing != null && !initializing.IsCompleted) {
+                e.Cancel = true;
+                Enabled = false;
+                initializing.ContinueWith(t => BeginInvoke((Action)Close));
+            }
+        }
+        else if (initializing != null && !initializing.IsCompleted) e.Cancel = true;
+        base.OnFormClosing(e);
+    }
+
+    private void CleanSession()
+    {
+        web.Dispose();
+        if (browser != null) {
+            using (browser) {
+                if (!browser.WaitForExit(1500)) { try { browser.Kill(); } catch (InvalidOperationException) {} browser.WaitForExit(); }
+            }
+        }
+        // Node handles long npm paths and unlinks junctions without traversing their targets.
+        var info = new System.Diagnostics.ProcessStartInfo(Path.Combine(Updates.Root, "node", "node.exe"),
+            "-e \"require('node:fs').rmSync(process.argv[1],{recursive:true,force:true,maxRetries:10,retryDelay:150})\" \"" + cache + "\"");
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        using (var cleaner = System.Diagnostics.Process.Start(info)) {
+            cleaner.WaitForExit();
+            if (cleaner.ExitCode != 0) MessageBox.Show("部分临时文件仍被占用：" + cache, "版本管理");
+        }
+    }
+
     internal VersionWindow()
     {
         // A window opened before DSH has ever exported a skin still needs a
@@ -59,15 +122,23 @@ internal sealed class VersionWindow : Form
         SkinTheme.Ensure();
         skin = SkinTheme.Load();
         verifySkin = Array.IndexOf(Environment.GetCommandLineArgs(), "--verify-skin") >= 0;
-        Text = "DeepSeek Harness - 版本管理";
+        Text = "DeepSeek Harness - DSH 版本切换";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         Size = new Size(960, 760); MinimumSize = new Size(720, 560);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = SkinTheme.ToColor(skin, "bg", Color.FromArgb(21, 21, 23));
         web.DefaultBackgroundColor = BackColor;
         Controls.Add(web);
-        Shown += async delegate { await Initialize(); };
-        FormClosed += delegate { timer.Dispose(); web.Dispose(); };
+        workerJob = Native.CreateJobObject(IntPtr.Zero, null);
+        var limits = new Native.ExtendedLimits();
+        limits.BasicLimitInformation.LimitFlags = 0x2000;
+        if (workerJob == IntPtr.Zero || !Native.SetInformationJobObject(workerJob, 9, ref limits, Marshal.SizeOf(limits)))
+            throw new System.ComponentModel.Win32Exception();
+        Updates.StartWindowWorker = StartWorker;
+        Updates.WindowCache = cache;
+        Updates.Transfer = transfer => Post(new { type = "transfer", transfer = transfer });
+        Shown += async delegate { initializing = Initialize(); await initializing; };
+        FormClosed += delegate { timer.Dispose(); CleanSession(); };
         timer.Tick += async delegate {
             if (!ready || busy || refreshing) return;
             refreshing = true;
@@ -88,7 +159,7 @@ internal sealed class VersionWindow : Form
     }
     private void Post(object data)
     {
-        if (IsDisposed || !IsHandleCreated) return;
+        if (closing || IsDisposed || !IsHandleCreated) return;
         if (InvokeRequired) { try { BeginInvoke((Action)(() => Post(data))); } catch (InvalidOperationException) {} return; }
         if (ready) web.CoreWebView2.PostWebMessageAsJson(Updates.Json(data));
     }
@@ -128,9 +199,13 @@ internal sealed class VersionWindow : Form
     {
         try {
             var env = await RuntimeEnvironment.CreateWebView2EnvironmentAsync(
-                Path.Combine(Updates.Root, "data", "version-switch-webview"));
-            if (IsDisposed) return;
+                Path.Combine(cache, "webview"));
+            if (closing || IsDisposed) return;
             await web.EnsureCoreWebView2Async(env);
+            browser = System.Diagnostics.Process.GetProcessById((int)web.CoreWebView2.BrowserProcessId);
+            // Retain the process handle so cleanup cannot target a recycled PID.
+            IntPtr browserHandle = browser.Handle;
+            if (closing) return;
             web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             web.CoreWebView2.Settings.IsStatusBarEnabled = false;
             // Install the cached skin at document creation, so this window never
@@ -174,7 +249,7 @@ internal sealed class VersionWindow : Form
             };
             using (var reader = new StreamReader(typeof(VersionSwitch).Assembly.GetManifestResourceStream("VersionSwitch.html")))
                 web.NavigateToString(reader.ReadToEnd());
-        } catch (Exception error) { MessageBox.Show(this, error.Message, "版本管理启动失败"); }
+        } catch (Exception error) { if (!closing) MessageBox.Show(this, error.Message, "版本管理启动失败"); }
     }
     private async Task SyncSelection()
     {

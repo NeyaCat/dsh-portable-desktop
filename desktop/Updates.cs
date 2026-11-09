@@ -56,6 +56,11 @@ internal static class Updates
         return "";
     }
 
+    // Only the version window sets these hooks. Desktop startup workers retain their own lifetime.
+    internal static Action<Process> StartWindowWorker;
+    internal static string WindowCache;
+    internal static Action<Dictionary<string, object>> Transfer;
+
     internal static Task<Dictionary<string, object>> Run(string command, Action<string> progress = null)
     {
         return Task.Run(() =>
@@ -84,7 +89,12 @@ internal static class Updates
             info.EnvironmentVariables["npm_config_userconfig"]=Path.Combine(home,"profiles","web",".npmrc");
             using (var process = new Process { StartInfo = info })
             {
-                process.Start();
+                if (StartWindowWorker == null) process.Start();
+                else {
+                    info.EnvironmentVariables["DSH_SWITCH_CACHE"] = WindowCache;
+                    info.RedirectStandardInput = true;
+                    StartWindowWorker(process);
+                }
                 var stderr = process.StandardError.ReadToEndAsync();
                 Dictionary<string, object> result = null;
                 string failure = null, line;
@@ -92,6 +102,7 @@ internal static class Updates
                 {
                     var row = new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024 }.Deserialize<Dictionary<string, object>>(line);
                     if (row.ContainsKey("progress") && progress != null) progress(Value(row, "progress"));
+                    if (row.ContainsKey("transfer") && Transfer != null) Transfer((Dictionary<string, object>)row["transfer"]);
                     if (row.ContainsKey("result")) result = row["result"] as Dictionary<string, object>;
                     if (row.ContainsKey("error")) failure = Value(row, "error");
                 }

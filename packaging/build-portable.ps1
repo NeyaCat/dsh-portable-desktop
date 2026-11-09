@@ -270,7 +270,7 @@ try {
     }
 
     Write-Step 'Writing launcher and documentation'
-    foreach ($script in @('update-worker.cjs', 'environment-store.cjs',
+    foreach ($script in @('update-worker.cjs', 'download-progress.cjs', 'environment-store.cjs',
         'switch-transaction.cjs', 'plugin-resolver.cjs', 'environment-cleanup.cjs',
         'first-run.cjs', 'install-plugins.cjs', 'plugin-catalog.cjs', 'portable-plugin-adapters.cjs', 'repair-http-proxy.cjs', 'cache-cleanup.cjs', 'version-transition.cjs')) {
         Copy-Item -LiteralPath (Join-Path $repo "desktop\$script") -Destination (Join-Path $payload 'desktop') -Force

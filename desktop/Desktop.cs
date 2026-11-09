@@ -63,7 +63,10 @@ internal static class Program
                 picker.ShowDialog();
             return;
         }
-        Run();
+        using (var lease = ShellMaintenance.Enter(AppDomain.CurrentDomain.BaseDirectory)) {
+            if (lease == null) return;
+            Run();
+        }
     }
 
     private static void Run()
@@ -975,6 +978,7 @@ internal sealed class DesktopWindow : Form
                 }
                 break;
             case "desktop:update-install": InstallUpdate(); break;
+            case "desktop:shell-update": BeginInvoke((Action)CheckShellUpdate); break;
             case "desktop:update-versions": OpenVersionSwitch(); break;
             case "desktop:menu": ShowIconMenu(); break;
             case "desktop:minimize": SystemCommand(0xF020); break;
@@ -1006,6 +1010,20 @@ internal sealed class DesktopWindow : Form
         Activate();
         Native.SetForegroundWindow(Handle);
         Log("Existing window activated");
+    }
+
+    private bool checkingShellUpdate;
+    private void CheckShellUpdate()
+    {
+        if (checkingShellUpdate || closing) return;
+        checkingShellUpdate = true;
+        try {
+            if (installingUpdate) { MessageBox.Show(this, "请先等待 DSH 版本准备完成。", "桌面软件更新"); return; }
+            using (var dialog = new ShellUpdateDialog(proxyBridge)) {
+                if (dialog.ShowDialog(this) == DialogResult.OK) { forceExit = true; Close(); }
+            }
+        } catch (Exception error) { MessageBox.Show(this, error.Message, "桌面软件更新"); }
+        finally { checkingShellUpdate = false; }
     }
 
     private void OpenVersionSwitch()
@@ -1465,7 +1483,7 @@ internal sealed class DesktopWindow : Form
     }
 }
 
-internal static class Native
+internal static partial class Native
 {
     [StructLayout(LayoutKind.Sequential)]
     internal struct Rect { internal int Left, Top, Right, Bottom; }
@@ -1483,31 +1501,4 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);
     [DllImport("user32.dll")] internal static extern bool AllowSetForegroundWindow(int processId);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern IntPtr CreateJobObject(IntPtr attributes, string name);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    internal static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimits limits, int length);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    internal static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-    [DllImport("kernel32.dll")] internal static extern bool TerminateJobObject(IntPtr job, uint exitCode);
-    [DllImport("kernel32.dll")] internal static extern bool CloseHandle(IntPtr handle);
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct BasicLimits
-    {
-        internal long PerProcessUserTimeLimit, PerJobUserTimeLimit;
-        internal uint LimitFlags;
-        internal UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
-        internal uint ActiveProcessLimit;
-        internal UIntPtr Affinity;
-        internal uint PriorityClass, SchedulingClass;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct IoCounters { internal ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount, OtherTransferCount; }
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct ExtendedLimits
-    {
-        internal BasicLimits BasicLimitInformation;
-        internal IoCounters IoInfo;
-        internal UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
-    }
 }

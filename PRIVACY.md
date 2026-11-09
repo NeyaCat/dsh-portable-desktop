@@ -23,7 +23,9 @@ The application contacts the network only for:
 
 1. **Update checks.** On launch it asks `https://registry.npmjs.org` for the
    published `@deepseek-ai/dsh` versions, and downloads a version when you accept
-   an update or use `Version Switch.exe`. The request carries no account data.
+   an update or use `Version Switch.exe`. Choosing “检查桌面软件更新” queries this
+   project’s GitHub Releases. Choosing to download retrieves the shell update
+   from GitHub. These requests carry no DSH account data.
 2. **Your own services.** Model providers, online plugins and other services you
    configure are contacted directly by DSH with your credentials.
 3. **Links you open.** External links are passed to your default browser.

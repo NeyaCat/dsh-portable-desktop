@@ -10,6 +10,45 @@
   if (document.documentElement) prepare();
   document.addEventListener('DOMContentLoaded', () => {
     prepare();
+    // The account plugin portals its menu outside the sidebar.
+    const attachVersionAction = (menu, trigger) => {
+      const settings = [...menu.querySelectorAll('button[role="menuitem"]')].find(item =>
+        [...item.children].some(label => /^(设置|設定|Settings)$/i.test(label.textContent.trim())));
+      if (!settings || menu.querySelector('[data-dsh-switch]')) return;
+      let previous = settings;
+      for (const [caption, symbol, command] of [
+        ['检查桌面软件更新', '↓', 'shell-update'],
+        ['切换 DSH 版本', '⇄', 'update-versions']
+      ]) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = settings.className;
+        action.setAttribute('role', 'menuitem');
+        action.dataset.dshSwitch = '';
+        const glyph = document.createElement('span');
+        glyph.className = settings.firstElementChild.className;
+        glyph.setAttribute('aria-hidden', 'true');
+        glyph.textContent = symbol;
+        const label = document.createElement('span');
+        label.className = settings.children[1]?.className || '';
+        label.textContent = caption;
+        action.append(glyph, label);
+        action.onclick = () => { trigger.click(); send(command); };
+        previous.after(action);
+        previous = action;
+      }
+    };
+    const accountMenus = new MutationObserver(records => {
+      const trigger = document.querySelector('button[data-signed-out][aria-haspopup="menu"][aria-expanded="true"]');
+      if (!trigger) return;
+      for (const record of records) for (const node of record.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        const menu = node.closest('[role="menu"]') || node.querySelector('[role="menu"]');
+        if (menu) attachVersionAction(menu, trigger);
+      }
+    });
+    accountMenus.observe(document.body, {subtree:true, childList:true});
+    window.addEventListener('pagehide', () => accountMenus.disconnect(), {once:true});
     // Do not expose a blank document between navigation and React mounting.
     const started = Date.now();
     let stable = 0, finished = false;

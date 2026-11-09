@@ -116,3 +116,18 @@ test('directory promotion does not retry unrelated errors', async () => {
   }), { code: 'ENOENT' });
   assert.equal(attempts, 1);
 });
+
+test('shell update compares desktop versions and requires a digest for the exact shell asset', () => {
+  const { shellRelease } = require('./update-worker.cjs');
+  const name = 'DSH-Desktop-Shell-1.10.0-win-x64.zip';
+  const url = 'https://github.com/NeyaCat/dsh-portable-desktop/releases/download/v1.10.0/' + name;
+  const asset = { name, state:'uploaded', browser_download_url:url, digest:'sha256:' + 'a'.repeat(64) };
+  const release = { tag_name:'v1.10.0', assets:[asset] };
+  assert.equal(shellRelease('1.9.0',release).url,url);
+  assert.equal(shellRelease('1.10.0-rc.2',release).newer,true);
+  assert.equal(shellRelease('1.10.0',release).newer,false);
+  assert.equal(shellRelease('2.0.0',release).newer,false);
+  assert.equal(shellRelease('1.9.0',{...release,assets:[]}).url,'');
+  assert.equal(shellRelease('1.9.0',{...release,assets:[{...asset,digest:null}]}).url,'');
+  assert.equal(shellRelease('1.9.0',{...release,assets:[{...asset,browser_download_url:'https://example.org/other.zip'}]}).url,'');
+});

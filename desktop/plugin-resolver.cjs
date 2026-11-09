@@ -82,7 +82,7 @@ async function metadata(root, name) {
     try { response=await fetch('https://registry.npmjs.org/'+encodeURIComponent(name),{signal:AbortSignal.timeout(20000)}); if(!response.ok)throw Error('HTTP '+response.status); }
     catch { response=await fetch('https://registry.npmmirror.com/'+encodeURIComponent(name),{signal:AbortSignal.timeout(20000)}); }
     if(!response.ok) throw Error('HTTP '+response.status);
-    const data=await response.json(); await S.write(file,{fetchedAt:new Date().toISOString(),data}); return data;
+    const data=await require('./download-progress.cjs').readMetadata(response,name+' 版本资料'); await S.write(file,{fetchedAt:new Date().toISOString(),data}); return data;
   } catch(error) {
     if(S.exists(file)) return S.json(file).data;
     throw Error('无法取得 '+name+' 的版本资料（未将网络错误视为不兼容）');
@@ -90,7 +90,7 @@ async function metadata(root, name) {
 }
 function runNode(root,args,cwd) {
   return new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,args,{cwd,windowsHide:true,env:{...process.env,npm_config_userconfig:process.env.npm_config_userconfig||path.join(root,'data/profiles/web/.npmrc'),PATH:path.join(root,'node')+path.delimiter+process.env.PATH},stdio:['ignore','pipe','pipe']});
+    const child=require('./download-progress.cjs').spawnInstaller(args,{cwd,windowsHide:true,env:{...process.env,npm_config_userconfig:process.env.npm_config_userconfig||path.join(root,'data/profiles/web/.npmrc'),PATH:path.join(root,'node')+path.delimiter+process.env.PATH},stdio:['ignore','pipe','pipe']});
     let output=''; const receive=b=>{output=(output+b).slice(-6000);};child.stdout.on('data',receive);child.stderr.on('data',receive);
     const timer=setTimeout(()=>{const kill=spawn('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});kill.on('error',()=>child.kill());},600000);
     child.on('error',error=>{clearTimeout(timer);reject(error);}); child.on('close',code=>{clearTimeout(timer);code===0?resolve():reject(Error('插件依赖安装失败（退出码 '+code+'），原环境未改动'));});
@@ -112,19 +112,27 @@ async function relocateInstaller(home) {
   }
 }
 async function artifact(root,name,version,progress) {
-  const key=S.digest(name+'@'+version), folder=path.join(root,'artifacts/plugins',key), ready=path.join(folder,'ready.json');
+  const key=S.digest(name+'@'+version), destination=path.join(root,'artifacts/plugins',key);
+  const session=process.env.DSH_SWITCH_CACHE;
+  const folder=session ? path.join(session,key) : destination;
+  const ready=path.join(destination,'ready.json');
   if(S.exists(ready)) {
     const info=S.json(ready);
-    if((await S.treeHash(path.join(folder,'node_modules'))).hash===info.hash) return {key,...info};
+    if((await S.treeHash(path.join(destination,'node_modules'))).hash===info.hash) return {key,...info};
     throw Error('缓存插件制品校验失败：'+name+'，请保留现场并重新下载到新制品目录');
   }
-  // The artifact's local store avoids pnpm's stale external project symlinks in copied profiles.
+  // Old installers may have left a partial tree. Move it under session
+  // cleanup while holding the transaction lock, before publishing a new one.
+  if(session && S.exists(destination))
+    await fs.promises.rename(destination,path.join(session,'partial-'+S.id()));
   await S.write(path.join(folder,'package.json'),{private:true,dependencies:{[name]:version}});
   progress('正在准备插件 '+name+' '+version+'…');
+  const storeDir=session ? path.join(session,'pnpm-store') : '.pnpm-store';
   const pnpm=path.join(root,'desktop/plugin-tools/node_modules/pnpm/bin/pnpm.cjs');
   if(!S.exists(pnpm)) throw Error('缺少内置插件安装工具 pnpm');
-  try { await runNode(root,[pnpm,'install','--store-dir','.pnpm-store','--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmjs.org'],folder); }
-  catch(error) { progress('直连下载失败，正在使用镜像重试 '+name+'…'); await runNode(root,[pnpm,'install','--store-dir','.pnpm-store','--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmmirror.com'],folder); }
+  try { await runNode(root,[pnpm,'install','--store-dir',storeDir,'--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmjs.org'],folder); }
+  catch(error) { progress('直连下载失败，正在使用镜像重试 '+name+'…'); await runNode(root,[pnpm,'install','--store-dir',storeDir,'--config.auto-install-peers=false','--node-linker=hoisted','--ignore-scripts','--registry=https://registry.npmmirror.com'],folder); }
+  progress('正在校验插件 '+name+' '+version+'…');
   const pkg=S.json(path.join(folder,'node_modules',name,'package.json'));
   if(pkg.version!==version) throw Error('插件版本校验失败');
   // Build scripts are deliberately not executed in the background with user credentials.
@@ -132,7 +140,12 @@ async function artifact(root,name,version,progress) {
   if(Object.values(lock.packages||{}).some(p=>p.requiresBuild) || pkg.scripts?.install || pkg.scripts?.postinstall || pkg.gypfile)
     throw Error('插件需要安装脚本，不能作为已验证制品自动启用：'+name);
   const info={name,version,...await S.treeHash(path.join(folder,'node_modules')),createdAt:new Date().toISOString()};
-  await S.write(ready,info); return {key,...info};
+  await S.write(path.join(folder,'ready.json'),info);
+  if(session) {
+    await fs.promises.mkdir(path.dirname(destination),{recursive:true});
+    await fs.promises.rename(folder,destination);
+  }
+  return {key,...info};
 }
 async function planPlugins(root, current, target, options={}, progress=()=>{}) {
   const changes=[];
@@ -146,6 +159,7 @@ async function planPlugins(root, current, target, options={}, progress=()=>{}) {
     const policy=options.policies?.[plugin.name];
     if(plugin.source==='npm' && !policy?.pinned) {
       try {
+        progress('正在检查插件 '+plugin.name+' 的版本资料…');
         const meta=await metadata(root,plugin.name); checkedUpdates=true;
         const candidates=Object.entries(meta.versions||{}).filter(([v,m])=>semver.valid(v)&&!m.deprecated&&m.dist?.integrity&&m.dist?.tarball&&compatibility(m,target).ok)
           .sort(([a],[b])=>semver.rcompare(a,b));

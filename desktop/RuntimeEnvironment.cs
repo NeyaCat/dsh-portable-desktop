@@ -472,7 +472,7 @@ internal static class RuntimeEnvironment
         catch (Exception) { return false; }
     }
 
-    private static void EnableTls()
+    internal static void EnableTls()
     {
         try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; }
         catch (Exception) { }

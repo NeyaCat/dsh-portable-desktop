@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
-<title>版本管理</title>
+<title>DSH 版本切换</title>
 <style>
 /* Last-resort palette. The host installs the cached DSH skin as inline custom
    properties at document creation, which always wins over this :root block. */
@@ -13,7 +13,7 @@ header{padding:26px 30px 18px;border-bottom:1px solid var(--border);background:l
 .summary{display:flex;gap:12px;margin-top:18px}.summary>div{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;box-shadow:var(--shadow)}.summary label{display:block;color:var(--muted);font-size:12px}.summary strong{font-size:17px;letter-spacing:.3px}.summary .current{border-color:var(--accent)}
 .toolbar{padding:16px 30px 10px;display:flex;align-items:center;gap:12px}.toolbar input{flex:1;min-width:80px}button,input{font:inherit;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px}input:focus{outline:2px solid var(--focus);outline-offset:1px}button{cursor:pointer;transition:background .15s}button:hover:not(:disabled){background:var(--hover)}button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}button:disabled{opacity:.45;cursor:default}#count{font-size:12px;color:var(--tertiary);white-space:nowrap}
 main{overflow:auto;flex:1;padding:4px 30px 20px;scrollbar-color:var(--border) transparent}.row{width:100%;display:flex;align-items:center;gap:15px;text-align:left;padding:14px 16px;margin:7px 0;border-radius:var(--radius);position:relative;min-height:74px;background:var(--surface);box-shadow:var(--shadow)}.row[data-selected=true]{outline:2px solid var(--accent);outline-offset:-2px;background:var(--soft)}.row.running{border-left:4px solid var(--accent)}.radio{width:17px;height:17px;border:1px solid var(--muted);border-radius:50%;flex:none}.row[data-selected=true] .radio{border:5px solid var(--accent)}.version{font-size:16px;font-weight:600}.detail{color:var(--tertiary);font-size:12px}.badges{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}.badge{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--hover);color:var(--muted);white-space:nowrap}.badge.active{background:var(--accent);color:var(--on-accent)}.badge.danger{border:1px solid var(--danger);color:var(--danger);background:transparent}.empty{padding:40px;text-align:center;color:var(--muted)}
-footer{padding:15px 30px 18px;border-top:1px solid var(--border);background:var(--surface)}.actions{display:flex;gap:20px;align-items:center;justify-content:space-between}#status{font-size:13px;overflow-wrap:anywhere}#install{flex:none;background:var(--accent);color:var(--on-accent);border-color:transparent;min-width:142px;font-weight:600}#install:hover:not(:disabled){filter:brightness(1.08)}.note{font-size:11px;color:var(--tertiary);margin-top:10px}.progress{height:2px;background:var(--accent);animation:pulse 1.2s ease-in-out infinite}.progress[hidden]{display:none}@keyframes pulse{50%{opacity:.25}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+footer{padding:15px 30px 18px;border-top:1px solid var(--border);background:var(--surface)}.actions{display:flex;gap:20px;align-items:center;justify-content:space-between}#status{font-size:13px;overflow-wrap:anywhere}#install{flex:none;background:var(--accent);color:var(--on-accent);border-color:transparent;min-width:142px;font-weight:600}#install:hover:not(:disabled){filter:brightness(1.08)}.note{font-size:11px;color:var(--tertiary);margin-top:10px}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* Neutral outlines follow the skin foreground, not its brand accent. */
 header{background:transparent}.eyebrow{color:var(--muted)}
 .summary .current{border-color:var(--text)}
@@ -22,7 +22,7 @@ button{background:transparent;border-color:color-mix(in srgb,var(--text) 45%,tra
 .row.running{border-left-color:var(--text)}.row[data-selected=true] .radio{border-color:var(--text)}
 .badge.active{background:transparent;color:var(--text);border:1px solid currentColor}
 #install{background:transparent;color:var(--text);border-color:var(--text)}
-#plan{border-color:var(--text)!important}.progress{background:var(--text)}
+#plan{border-color:var(--text)!important}#progress{width:100%;height:6px;flex:none;accent-color:var(--accent)}
 button:focus-visible,input:focus{outline-color:var(--text)}
 #caption{height:30px;flex:none;display:flex;align-items:center;background:transparent;user-select:none;padding-left:12px;font-size:12px}
 #caption .caption-title{flex:1;display:flex;align-items:center;gap:8px;height:100%}
@@ -48,12 +48,12 @@ footer{padding:6px 20px;background:transparent}.actions{gap:8px}#status{font-siz
 #caption{height:28px}#caption button{height:28px}
 #plan{padding:12px!important;margin-top:8px}#plan h2{font-size:16px;margin:0 0 6px}
 </style></head><body>
-<div id="caption"><div class="caption-title"><img id="caption-icon" alt=""><span>DeepSeek Harness - 版本管理</span></div><button id="window-min" aria-label="最小化">—</button><button id="window-max" aria-label="最大化或还原">□</button><button id="window-close" aria-label="关闭">×</button></div>
-<main id="content"><header><div class="eyebrow">DEEPSEEK HARNESS</div><h1>版本管理</h1><p>选择版本，确认插件变化，后台准备后重启应用。</p><div class="summary"><div class="current"><label id="current-label">当前版本</label><strong id="current">读取中…</strong></div><div><label>下次启动</label><strong id="next">读取中…</strong></div></div></header>
+<div id="caption"><div class="caption-title"><img id="caption-icon" alt=""><span>DeepSeek Harness - DSH 版本切换</span></div><button id="window-min" aria-label="最小化">—</button><button id="window-max" aria-label="最大化或还原">□</button><button id="window-close" aria-label="关闭">×</button></div>
+<main id="content"><header><div class="eyebrow">DEEPSEEK HARNESS</div><h1>DSH 版本切换</h1><p>选择版本，确认插件变化，后台准备后重启应用。</p><div class="summary"><div class="current"><label id="current-label">当前版本</label><strong id="current">读取中…</strong></div><div><label>下次启动</label><strong id="next">读取中…</strong></div></div></header>
 <div class="sticky-tools"><div class="toolbar"><input id="search" aria-label="搜索版本" placeholder="搜索版本号…" autocomplete="off"><span id="count">查询中</span><button id="refresh">刷新版本</button></div>
 <div class="toolbar"><button id="releases-tab">发行版本</button><button id="env-tab">版本记录 / 恢复点</button><button id="cleanup-cache">清理缓存</button><button id="cancel-pending" hidden>取消待切换</button><button id="recover" hidden>恢复上一版本</button></div>
 </div><section id="plan" hidden style="border:1px solid var(--accent);border-radius:var(--radius);padding:18px;margin-bottom:16px"><h2 id="plan-title"></h2><p id="data-notice"></p><p id="validation"></p><div id="changes"></div><label id="fresh-option" hidden style="display:block;margin:14px 0"><input type="checkbox" id="fresh-plugins"> 新增插件若有兼容版本，按默认配置带回（其原有私有数据仍留在新环境）</label><label style="display:block;margin:14px 0"><input type="checkbox" id="ack"> 我已了解上述插件与数据变化</label><button id="confirm-plan">确认并后台准备</button><button id="dismiss-plan">暂不处理</button></section><section id="env-list" hidden></section><section id="list" aria-label="发行版本"><div class="empty">正在加载官方版本列表…</div></section></main>
-<div id="progress" class="progress" hidden></div><footer><div class="actions"><p id="status" role="status" aria-live="polite">正在连接版本服务…</p></div><p class="note">来自官方 npm · 已隐藏弃用版本；未弃用不代表持续维护。切换前保存恢复点；无法安全迁移的数据不会自动覆盖。</p></footer>
+<progress id="progress" aria-label="当前操作进度" hidden></progress><footer><div class="actions"><p id="status" role="status" aria-live="polite">正在连接版本服务…</p></div><p class="note">来自官方 npm · 已隐藏弃用版本；未弃用不代表持续维护。切换前保存恢复点；无法安全迁移的数据不会自动覆盖。</p></footer>
 <script>
 const $=id=>document.getElementById(id), send=message=>window.chrome.webview.postMessage(message);
 $('caption-icon').src=window.__captionIcon||'';
@@ -102,6 +102,13 @@ window.chrome.webview.addEventListener('message',({data:m})=>{
  if(m.type==='theme')applySkin(m.theme);
  if(m.type==='catalog'){rows=m.data.versions;next=m.data.selected.version;running=m.running;chosen=chosen||running||next;render();}
  if(m.type==='selection'){next=m.selected.version;running=m.running;render();}
- if(m.type==='status'){busy=m.busy;$('status').textContent=m.text;buttons();if(!busy&&cleanupTicket){const ticket=cleanupTicket;cleanupTicket=null;if(!ticket.items.length)$('status').textContent='没有可清理的下载缓存；环境和恢复点均已保留。';else if(confirm(ticket.notice+'\n预计释放 '+Math.ceil(ticket.bytes/1048576)+' MB，确认清理？'))operation('cleanup:'+ticket.id);}}
+ if(m.type==='transfer'){
+   const {name,received,total}=m.transfer;
+   if(!busy)return;
+   const bar=$('progress'), size=n=>(n/1048576).toFixed(2)+' MiB';
+   if(total>0){bar.max=total;bar.value=received;}else bar.removeAttribute('value');
+   $('status').textContent='正在下载 '+name+' · '+size(received)+(total>0?' / '+size(total)+' · '+Math.min(100,Math.floor(100*received/total))+'%':'');
+ }
+ if(m.type==='status'){$('progress').removeAttribute('value');busy=m.busy;$('status').textContent=m.text;buttons();if(!busy&&cleanupTicket){const ticket=cleanupTicket;cleanupTicket=null;if(!ticket.items.length)$('status').textContent='没有可清理的下载缓存；环境和恢复点均已保留。';else if(confirm(ticket.notice+'\n预计释放 '+Math.ceil(ticket.bytes/1048576)+' MB，确认清理？'))operation('cleanup:'+ticket.id);}}
 });send('ready');
 </script></body></html>

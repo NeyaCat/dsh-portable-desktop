@@ -55,14 +55,14 @@ async function selectPlugins(plugins,target,getMetadata,report=()=>{}) {
   }
   return {selected,skipped};
 }
-function resolveFolder(name,folder,target) {
-  name=packageName(name.startsWith('@')?name.split('/').slice(0,2).join('/'):name.split('/')[0]);
+function resolveFolder(name,folder,target,isHostPackage) {
+  const host=path.join(target.root,'node_modules',name);
+  if(isHostPackage)return fs.existsSync(path.join(host,'package.json'))?host:null;
   for(let cursor=folder;;cursor=path.dirname(cursor)){
     const candidate=path.join(cursor,'node_modules',name);
     if(fs.existsSync(path.join(candidate,'package.json')))return candidate;
     if(path.dirname(cursor)===cursor)break;
   }
-  const host=path.join(target.root,'node_modules',name);
   if(fs.existsSync(path.join(host,'package.json')))return host;
   return null;
 }
@@ -85,9 +85,12 @@ function installedCompatibility(folder,target,seen=new Set()) {
     for(const row of items) {
       if(!row||row.disabled===true)continue;
       if(typeof row.name==='string'&&row.name!==pkg.name) {
-        const child=resolveFolder(row.name,folder,target);
+        const name=packageName(row.name.startsWith('@')?row.name.split('/').slice(0,2).join('/'):row.name.split('/')[0]);
+        const isHostPackage=name==='@deepseek-ai/cordis'||name==='@deepseek-ai/dsh'||name.startsWith('@deepseek-ai/dsh-');
+        const from=isHostPackage?target.root:folder;
+        const child=resolveFolder(name,folder,target,isHostPackage);
         if(!child)return {ok:false,reason:'bundle 内插件缺失：'+row.name};
-        try { createRequire(path.join(folder,'package.json')).resolve(row.name); }
+        try { createRequire(path.join(from,'package.json')).resolve(row.name); }
         catch {
           const childPkg=JSON.parse(fs.readFileSync(path.join(child,'package.json'),'utf8'));
           const base=childPkg.name,sub=row.name.slice(base.length);

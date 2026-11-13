@@ -29,6 +29,16 @@ test('bundle children are checked even when the carrier itself declares compatib
  pkg(child,{name:'child',version:'1.0.0',main:'missing.js'});
  assert.match(installedCompatibility(carrier,target).reason,/入口/);
 });
+test('bundle host references use the candidate core even with an older portable core nearby',()=>{
+ const base=temp(),carrier=path.join(base,'profiles/web/node_modules/carrier'),root=path.join(base,'versions/candidate');
+ const name='@deepseek-ai/dsh-skill-filesystem', version='0.2.2-rc.1';
+ pkg(carrier,{name:'carrier',dsh:{bundle:{patch:'patch.yml'}}},{'patch.yml':'- name: '+name+'\n'});
+ for(const [location,pin] of [[base,'0.2.1-rc.2'],[root,version]]) {
+   pkg(path.join(location,'node_modules',name),{name,main:'index.js',peerDependencies:{'@deepseek-ai/dsh-fs':pin}},{'index.js':''});
+ }
+ assert.equal(installedCompatibility(carrier,{root,version}).ok,true);
+ assert.match(installedCompatibility(carrier,{root,version:'0.2.3'}).reason,/dsh-fs/);
+});
 test('self subpath entries are valid and a missing exported entry is rejected',()=>{
  const folder=path.join(temp(),'node_modules/carrier');
  pkg(folder,{name:'carrier',version:'1.0.0',exports:{'./remote':'./remote.js'},dsh:{bundle:{patch:'cordis.patch.yml'}}},{'cordis.patch.yml':'- insert:\n    - name: carrier/remote\n','remote.js':'export {};'});
